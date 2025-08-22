@@ -85,16 +85,53 @@ impl CallGraphBuilder {
                 .unwrap_or("")
                 .replace(std::path::MAIN_SEPARATOR, ".")
                 .replace(".py", "");
-            
+
             // Remove .__init__ suffix for package __init__.py files
             // In Python, you import the package, not the __init__ file
             if module_name.ends_with(".__init__") {
-                module_name = module_name.strip_suffix(".__init__").unwrap_or(&module_name).to_string();
+                module_name = module_name
+                    .strip_suffix(".__init__")
+                    .unwrap_or(&module_name)
+                    .to_string();
             }
-            
+
             module_name
         } else {
             file_path.to_str().unwrap_or("").to_string()
+        }
+    }
+
+    pub fn resolve_relative_import_with_level(&self, module_name: &str, current_module: &str, level: u32) -> String {
+        // Handle relative imports using the level attribute
+        // level 1 = single dot (.), level 2 = double dot (..), etc.
+        
+        let current_parts: Vec<&str> = current_module.split('.').collect();
+        
+        if level == 1 {
+            // Single dot means import from current package
+            // For __init__.py files, this means import from within the current package
+            // For regular .py files, this means import from sibling module
+            format!("{}.{}", current_module, module_name)
+        } else if level > 1 {
+            // Multiple dots mean go up directories
+            let levels_up = (level - 1) as usize; // level 2 = go up 1 level, level 3 = go up 2 levels, etc.
+            
+            if levels_up >= current_parts.len() {
+                // Can't go up more levels than we have
+                return format!("{}{}", ".".repeat(level as usize), module_name);
+            }
+            
+            let base_parts = &current_parts[..current_parts.len() - levels_up];
+            let base_module = base_parts.join(".");
+            
+            if base_module.is_empty() {
+                module_name.to_string()
+            } else {
+                format!("{}.{}", base_module, module_name)
+            }
+        } else {
+            // level 0 should not happen here, but handle it as absolute
+            module_name.to_string()
         }
     }
 
@@ -103,26 +140,39 @@ impl CallGraphBuilder {
         if relative_import.starts_with('.') {
             let dots = relative_import.chars().take_while(|&c| c == '.').count();
             let import_path = &relative_import[dots..];
-            
+
             // Split current module into parts
             let current_parts: Vec<&str> = current_module.split('.').collect();
-            
-            if dots > current_parts.len() {
-                // Can't go up more levels than we have
-                return relative_import.to_string();
-            }
-            
-            // Go up 'dots' levels from current module
-            let base_parts = &current_parts[..current_parts.len() - dots];
-            let base_module = base_parts.join(".");
-            
-            if import_path.is_empty() {
-                // Just "from ." - import the parent package
-                base_module
+
+            if dots == 1 {
+                // Single dot means relative to current package
+                if import_path.is_empty() {
+                    // "from . import something" - import from current package
+                    current_module.to_string()
+                } else {
+                    // "from .something import ..."
+                    // If we're in an __init__.py file, this imports from within the current package
+                    // If we're in a regular .py file, this imports from a sibling module
+                    format!("{}.{}", current_module, import_path)
+                }
             } else {
-                // "from .something" - combine base with import path
-                if base_module.is_empty() {
-                    import_path.to_string()
+                // Multiple dots mean go up directories
+                if dots > current_parts.len() {
+                    // Can't go up more levels than we have
+                    return relative_import.to_string();
+                }
+
+                // Go up 'dots-1' levels from current module (dots-1 because 1 dot is current level)
+                let levels_up = dots - 1;
+                if levels_up >= current_parts.len() {
+                    return relative_import.to_string();
+                }
+
+                let base_parts = &current_parts[..current_parts.len() - levels_up];
+                let base_module = base_parts.join(".");
+
+                if import_path.is_empty() {
+                    base_module
                 } else {
                     format!("{}.{}", base_module, import_path)
                 }
@@ -135,7 +185,7 @@ impl CallGraphBuilder {
 
     pub fn visit_stmt(&mut self, stmt: &Stmt, lib_root: &Path) {
         let current_module = self.derive_module(&self.current_file_path, lib_root);
-        
+
         match stmt {
             Stmt::Import(import_stmt) => {
                 for alias in &import_stmt.names {
@@ -145,10 +195,10 @@ impl CallGraphBuilder {
                         .as_ref()
                         .map(|name| name.to_string())
                         .unwrap_or_else(|| module_name.clone());
-                    
+
                     // Store in internal imports map for function resolution
                     self.imports.insert(alias_name, module_name.clone());
-                    
+
                     // Add absolute import to the current module's imports list
                     self.add_import_to_module(&current_module, &module_name);
                 }
@@ -157,9 +207,15 @@ impl CallGraphBuilder {
                 if let Some(module) = &import_from_stmt.module {
                     let module_name = module.to_string();
                     
-                    // Resolve relative imports to absolute
-                    let absolute_module = self.resolve_relative_import(&module_name, &current_module);
-                    
+                    // Use the level attribute to determine if this is a relative import
+                    let absolute_module = if import_from_stmt.level > 0 {
+                        // This is a relative import
+                        self.resolve_relative_import_with_level(&module_name, &current_module, import_from_stmt.level)
+                    } else {
+                        // This is an absolute import
+                        module_name.clone()
+                    };
+
                     for alias in &import_from_stmt.names {
                         let imported_name = alias.name.to_string();
                         let alias_name = alias
@@ -167,11 +223,11 @@ impl CallGraphBuilder {
                             .as_ref()
                             .map(|name| name.to_string())
                             .unwrap_or_else(|| imported_name.clone());
-                        
+
                         // Store in internal imports map for function resolution
                         let full_path = format!("{}.{}", absolute_module, imported_name);
                         self.imports.insert(alias_name, full_path.clone());
-                        
+
                         // Add absolute import to the current module's imports list
                         if imported_name == "*" {
                             // Handle star imports
@@ -181,7 +237,7 @@ impl CallGraphBuilder {
                             self.add_import_to_module(&current_module, &full_path);
                         }
                     }
-                } else {
+                } else if import_from_stmt.level > 0 {
                     // Handle relative imports without explicit module (e.g., "from . import something")
                     // This means it's a relative import from the current package level
                     for alias in &import_from_stmt.names {
@@ -191,25 +247,52 @@ impl CallGraphBuilder {
                             .as_ref()
                             .map(|name| name.to_string())
                             .unwrap_or_else(|| imported_name.clone());
-                        
-                        // This is a relative import from current package
-                        let absolute_import = if current_module.is_empty() {
-                            imported_name.clone()
+
+                        // This is a relative import - use level to determine the base module
+                        let absolute_import = if import_from_stmt.level == 1 {
+                            // Single dot: import from current package
+                            if current_module.is_empty() {
+                                imported_name.clone()
+                            } else {
+                                format!("{}.{}", current_module, imported_name)
+                            }
                         } else {
-                            format!("{}.{}", current_module, imported_name)
+                            // Multiple dots: go up directories
+                            let current_parts: Vec<&str> = current_module.split('.').collect();
+                            let levels_up = (import_from_stmt.level - 1) as usize;
+                            
+                            if levels_up >= current_parts.len() {
+                                imported_name.clone()
+                            } else {
+                                let base_parts = &current_parts[..current_parts.len() - levels_up];
+                                let base_module = base_parts.join(".");
+                                if base_module.is_empty() {
+                                    imported_name.clone()
+                                } else {
+                                    format!("{}.{}", base_module, imported_name)
+                                }
+                            }
                         };
-                        
+
                         // Store in internal imports map for function resolution
                         self.imports.insert(alias_name, absolute_import.clone());
-                        
+
                         // Add absolute import to the current module's imports list
                         if imported_name == "*" {
-                            let star_import = format!("{}.*", absolute_import.strip_suffix(".*").unwrap_or(&absolute_import));
+                            let star_import = format!(
+                                "{}.*",
+                                absolute_import
+                                    .strip_suffix(".*")
+                                    .unwrap_or(&absolute_import)
+                            );
                             self.add_import_to_module(&current_module, &star_import);
                         } else {
                             self.add_import_to_module(&current_module, &absolute_import);
                         }
                     }
+                } else {
+                    // Absolute import with no module (shouldn't happen in normal Python, but handle it)
+                    // This case is rare and might indicate malformed import statements
                 }
             }
             Stmt::FunctionDef(func_def) => {
