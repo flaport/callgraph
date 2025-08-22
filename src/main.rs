@@ -3,6 +3,7 @@ use clap::Parser;
 use ruff_python_ast::{Expr, Stmt};
 use ruff_python_parser::parse_module;
 use serde::{Deserialize, Serialize};
+use serde_yaml::Value;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -31,6 +32,7 @@ struct CallGraph {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 struct FunctionInfo {
     name: String,
+    module: String,
     file: String,
     line: usize,
     calls: Vec<String>,
@@ -47,6 +49,7 @@ struct ResolvedCall {
 struct CallGraphBuilder {
     functions: HashMap<String, FunctionInfo>,
     current_file: String,
+    current_file_path: PathBuf,
     imports: HashMap<String, String>, // alias -> full_module_path
 }
 
@@ -55,15 +58,45 @@ impl CallGraphBuilder {
         Self {
             functions: HashMap::new(),
             current_file: String::new(),
+            current_file_path: PathBuf::new(),
             imports: HashMap::new(),
         }
     }
 
+    fn derive_module_path(&self, file_path: &Path) -> String {
+        let path_str = file_path.display().to_string();
+
+        // Remove file extension
+        let without_extension = if path_str.ends_with(".py") {
+            path_str.strip_suffix(".py").unwrap_or(&path_str)
+        } else if path_str.ends_with(".pic.yml") {
+            path_str.strip_suffix(".pic.yml").unwrap_or(&path_str)
+        } else {
+            &path_str
+        };
+
+        // Convert path separators to dots for module notation
+        without_extension.replace('/', ".").replace('\\', ".")
+    }
+
     fn analyze_file(&mut self, file_path: &Path) -> Result<()> {
+        self.current_file = file_path.display().to_string();
+        self.current_file_path = file_path.to_path_buf();
+
+        let file_name = file_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+
+        if file_name.ends_with(".pic.yml") {
+            self.analyze_yaml_file(file_path)
+        } else if file_path.extension().map_or(false, |ext| ext == "py") {
+            self.analyze_python_file(file_path)
+        } else {
+            Ok(())
+        }
+    }
+
+    fn analyze_python_file(&mut self, file_path: &Path) -> Result<()> {
         let content = fs::read_to_string(file_path)
             .with_context(|| format!("Failed to read file: {}", file_path.display()))?;
-
-        self.current_file = file_path.display().to_string();
 
         // Clear imports for each new file
         self.imports.clear();
@@ -83,6 +116,51 @@ impl CallGraphBuilder {
             self.visit_stmt(stmt);
         }
 
+        Ok(())
+    }
+
+    fn analyze_yaml_file(&mut self, file_path: &Path) -> Result<()> {
+        let content = fs::read_to_string(file_path)
+            .with_context(|| format!("Failed to read YAML file: {}", file_path.display()))?;
+
+        let yaml: Value = serde_yaml::from_str(&content)
+            .with_context(|| format!("Failed to parse YAML file: {}", file_path.display()))?;
+
+        // Extract function name from file name (remove .pic.yml extension)
+        let file_name = file_path
+            .file_stem()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown");
+        let func_name = file_name.strip_suffix(".pic").unwrap_or(file_name);
+
+        let mut calls = Vec::new();
+
+        // Extract component calls from instances
+        if let Some(instances) = yaml.get("instances") {
+            if let Some(instances_map) = instances.as_mapping() {
+                for (_, instance) in instances_map {
+                    if let Some(component) = instance.get("component") {
+                        if let Some(component_name) = component.as_str() {
+                            calls.push(component_name.to_string());
+                        }
+                    }
+                }
+            }
+        }
+
+        // YAML files don't have decorators or resolvable calls (no imports)
+        let module_path = self.derive_module_path(file_path);
+        let func_info = FunctionInfo {
+            name: func_name.to_string(),
+            module: module_path,
+            file: self.current_file.clone(),
+            line: 1, // YAML files start at line 1
+            calls,
+            decorators: Vec::new(),
+            resolved_calls: Vec::new(),
+        };
+
+        self.functions.insert(func_name.to_string(), func_info);
         Ok(())
     }
 
@@ -142,8 +220,10 @@ impl CallGraphBuilder {
                     })
                     .collect();
 
+                let module_path = self.derive_module_path(&self.current_file_path);
                 let func_info = FunctionInfo {
                     name: func_name.clone(),
+                    module: format!("{}.{}", module_path, func_name),
                     file: self.current_file.clone(),
                     line: func_def.range.start().to_usize(),
                     calls,
@@ -183,8 +263,10 @@ impl CallGraphBuilder {
                             })
                             .collect();
 
+                        let module_path = self.derive_module_path(&self.current_file_path);
                         let func_info = FunctionInfo {
                             name: full_method_name.clone(),
+                            module: format!("{}.{}", module_path, full_method_name),
                             file: self.current_file.clone(),
                             line: method_def.range.start().to_usize(),
                             calls,
@@ -336,20 +418,24 @@ impl CallGraphBuilder {
     }
 }
 
-fn find_python_files(dir: &Path) -> Result<Vec<PathBuf>> {
-    let mut python_files = Vec::new();
+fn find_analyzable_files(dir: &Path) -> Result<Vec<PathBuf>> {
+    let mut files = Vec::new();
 
     for entry in WalkDir::new(dir) {
         let entry = entry
             .with_context(|| format!("Failed to read directory entry in {}", dir.display()))?;
         let path = entry.path();
 
-        if path.is_file() && path.extension().map_or(false, |ext| ext == "py") {
-            python_files.push(path.to_path_buf());
+        if path.is_file() {
+            let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            if path.extension().map_or(false, |ext| ext == "py") || file_name.ends_with(".pic.yml")
+            {
+                files.push(path.to_path_buf());
+            }
         }
     }
 
-    Ok(python_files)
+    Ok(files)
 }
 
 fn main() -> Result<()> {
@@ -363,16 +449,16 @@ fn main() -> Result<()> {
         anyhow::bail!("Path is not a directory: {}", args.path.display());
     }
 
-    let python_files = find_python_files(&args.path)
-        .with_context(|| format!("Failed to find Python files in {}", args.path.display()))?;
+    let files = find_analyzable_files(&args.path)
+        .with_context(|| format!("Failed to find analyzable files in {}", args.path.display()))?;
 
-    if python_files.is_empty() {
-        anyhow::bail!("No Python files found in {}", args.path.display());
+    if files.is_empty() {
+        anyhow::bail!("No Python or YAML files found in {}", args.path.display());
     }
 
     let mut builder = CallGraphBuilder::new();
 
-    for file_path in python_files {
+    for file_path in files {
         if let Err(e) = builder.analyze_file(&file_path) {
             eprintln!("Warning: Failed to analyze {}: {}", file_path.display(), e);
             continue;
