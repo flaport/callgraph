@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::Context;
 use ruff_python_ast::{Expr, Stmt};
 use ruff_python_parser::parse_module;
 use serde_yaml::Value;
@@ -41,7 +41,7 @@ impl CallGraphBuilder {
         without_extension.replace('/', ".").replace('\\', ".")
     }
 
-    pub fn analyze_file(&mut self, file_path: &Path) -> Result<()> {
+    pub fn analyze_file(&mut self, file_path: &Path) -> anyhow::Result<()> {
         self.current_file = file_path.display().to_string();
         self.current_file_path = file_path.to_path_buf();
 
@@ -56,7 +56,7 @@ impl CallGraphBuilder {
         }
     }
 
-    fn analyze_python_file(&mut self, file_path: &Path) -> Result<()> {
+    fn analyze_python_file(&mut self, file_path: &Path) -> anyhow::Result<()> {
         let content = fs::read_to_string(file_path)
             .with_context(|| format!("Failed to read file: {}", file_path.display()))?;
 
@@ -81,7 +81,7 @@ impl CallGraphBuilder {
         Ok(())
     }
 
-    fn analyze_yaml_file(&mut self, file_path: &Path) -> Result<()> {
+    fn analyze_yaml_file(&mut self, file_path: &Path) -> anyhow::Result<()> {
         let content = fs::read_to_string(file_path)
             .with_context(|| format!("Failed to read YAML file: {}", file_path.display()))?;
 

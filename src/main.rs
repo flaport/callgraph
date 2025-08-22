@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::Context;
 use clap::Parser;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -21,7 +21,7 @@ struct Args {
     function: Option<String>,
 }
 
-fn main() -> Result<()> {
+fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
     // Collect all paths to analyze (main path + dependencies)

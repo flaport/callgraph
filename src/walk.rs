@@ -1,8 +1,8 @@
-use anyhow::{Context, Result};
+use anyhow::Context;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
-pub fn find_analyzable_files(dir: &Path) -> Result<Vec<PathBuf>> {
+pub fn find_analyzable_files(dir: &Path) -> anyhow::Result<Vec<PathBuf>> {
     let mut files = Vec::new();
 
     for entry in WalkDir::new(dir) {
