@@ -16,8 +16,11 @@ use walkdir::WalkDir;
 )]
 struct Args {
     /// Path to the top-level folder of the Python library
-    #[arg(short, long)]
     path: PathBuf,
+
+    /// Show only the specified function (optional)
+    #[arg(short, long)]
+    function: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -25,7 +28,7 @@ struct CallGraph {
     functions: HashMap<String, FunctionInfo>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 struct FunctionInfo {
     name: String,
     file: String,
@@ -244,7 +247,19 @@ fn main() -> Result<()> {
         }
     }
 
-    let call_graph = builder.build_call_graph();
+    let mut call_graph = builder.build_call_graph();
+
+    // Filter to specific function if requested
+    if let Some(function_name) = &args.function {
+        if let Some(func_info) = call_graph.functions.get(function_name) {
+            let mut filtered_functions = HashMap::new();
+            filtered_functions.insert(function_name.clone(), func_info.clone());
+            call_graph.functions = filtered_functions;
+        } else {
+            anyhow::bail!("Function '{}' not found in the call graph", function_name);
+        }
+    }
+
     let json_output = serde_json::to_string_pretty(&call_graph)
         .context("Failed to serialize call graph to JSON")?;
 
