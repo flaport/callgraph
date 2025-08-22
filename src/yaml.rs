@@ -6,7 +6,11 @@ use std::path::Path;
 use super::callgraph::CallGraphBuilder;
 use super::schema::FunctionInfo;
 
-pub fn analyze_yaml_file(builder: &mut CallGraphBuilder, file_path: &Path) -> anyhow::Result<()> {
+pub fn analyze_yaml_file(
+    builder: &mut CallGraphBuilder,
+    file_path: &Path,
+    lib_root: &Path,
+) -> anyhow::Result<()> {
     let content = fs::read_to_string(file_path)
         .with_context(|| format!("Failed to read YAML file: {}", file_path.display()))?;
 
@@ -14,10 +18,7 @@ pub fn analyze_yaml_file(builder: &mut CallGraphBuilder, file_path: &Path) -> an
         .with_context(|| format!("Failed to parse YAML file: {}", file_path.display()))?;
 
     // Extract function name from file name (remove .pic.yml extension)
-    let file_name = file_path
-        .file_stem()
-        .and_then(|n| n.to_str())
-        .unwrap_or("unknown");
+    let file_name = file_path.file_stem().and_then(|n| n.to_str()).unwrap_or("");
     let func_name = file_name.strip_suffix(".pic").unwrap_or(file_name);
 
     let mut calls = Vec::new();
@@ -36,17 +37,31 @@ pub fn analyze_yaml_file(builder: &mut CallGraphBuilder, file_path: &Path) -> an
     }
 
     // YAML files don't have decorators or resolvable calls (no imports)
-    let module_path = builder.derive_module_path(file_path);
+    let module_path = derive_module(file_path, lib_root);
     let func_info = FunctionInfo {
         name: func_name.to_string(),
         module: module_path,
         file: builder.current_file.clone(),
         line: 1, // YAML files start at line 1
         calls,
-        decorators: Vec::new(),
+        decorators: vec!["yaml".to_string()],
         resolved_calls: Vec::new(),
     };
 
     builder.functions.insert(func_name.to_string(), func_info);
     Ok(())
+}
+
+fn derive_module(file_path: &Path, lib_root: &Path) -> String {
+    // Derive module path relative to the library root
+    let parent_lib_root = lib_root.parent().unwrap_or(lib_root);
+    if let Some(relative_path) = file_path.strip_prefix(parent_lib_root).ok() {
+        relative_path
+            .to_str()
+            .unwrap_or("")
+            .replace(std::path::MAIN_SEPARATOR, ".")
+            .replace(".pic.yml", "_picyml")
+    } else {
+        file_path.to_str().unwrap_or("").to_string()
+    }
 }

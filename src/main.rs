@@ -52,7 +52,10 @@ fn main() -> anyhow::Result<()> {
 
     // Analyze all paths (main + dependencies)
     for path in &paths {
-        let files = find_analyzable_files(path)
+        let path = path
+            .canonicalize()
+            .with_context(|| format!("Failed to canonicalize path: {}", path.display()))?;
+        let files = find_analyzable_files(&path)
             .with_context(|| format!("Failed to find analyzable files in {}", path.display()))?;
 
         if files.is_empty() {
@@ -64,7 +67,7 @@ fn main() -> anyhow::Result<()> {
         }
 
         for file_path in files {
-            if let Err(e) = builder.analyze_file(&file_path) {
+            if let Err(e) = builder.analyze_file(&file_path, &path) {
                 eprintln!("Warning: Failed to analyze {}: {}", file_path.display(), e);
                 continue;
             }

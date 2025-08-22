@@ -25,14 +25,14 @@ impl CallGraphBuilder {
         }
     }
 
-    pub fn analyze_file(&mut self, file_path: &Path) -> anyhow::Result<()> {
+    pub fn analyze_file(&mut self, file_path: &Path, lib_root: &Path) -> anyhow::Result<()> {
         self.current_file = file_path.display().to_string();
         self.current_file_path = file_path.to_path_buf();
 
         let file_name = file_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
 
         if file_name.ends_with(".pic.yml") {
-            analyze_yaml_file(self, file_path)
+            analyze_yaml_file(self, file_path, lib_root)
         } else if file_path.extension().map_or(false, |ext| ext == "py") {
             self.analyze_python_file(file_path)
         } else {
