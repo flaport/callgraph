@@ -14,52 +14,44 @@ use callgraph::walk::find_analyzable_files;
 )]
 struct Args {
     /// Path to the top-level folder of the Python library
-    path: PathBuf,
+    paths: Vec<PathBuf>,
 
     /// Show only the specified function (optional)
     #[arg(short, long)]
     function: Option<String>,
-
-    /// Additional dependency module paths to analyze (can be used multiple times)
-    #[arg(short, long)]
-    dependency: Vec<PathBuf>,
 }
 
 fn main() -> Result<()> {
     let args = Args::parse();
 
-    if !args.path.exists() {
-        anyhow::bail!("Path does not exist: {}", args.path.display());
-    }
-
-    if !args.path.is_dir() {
-        anyhow::bail!("Path is not a directory: {}", args.path.display());
-    }
-
     // Collect all paths to analyze (main path + dependencies)
-    let mut all_paths = vec![args.path.clone()];
-    for dep_path in &args.dependency {
-        if !dep_path.exists() {
+    let mut paths = vec![];
+    for path in &args.paths {
+        if !path.exists() {
             eprintln!(
                 "Warning: Dependency path does not exist: {}",
-                dep_path.display()
+                path.display()
             );
             continue;
         }
-        if !dep_path.is_dir() {
+        if !path.is_dir() {
             eprintln!(
                 "Warning: Dependency path is not a directory: {}",
-                dep_path.display()
+                path.display()
             );
             continue;
         }
-        all_paths.push(dep_path.clone());
+        paths.push(path.clone());
+    }
+
+    if paths.len() == 0 {
+        anyhow::bail!("No valid paths given.");
     }
 
     let mut builder = CallGraphBuilder::new();
 
     // Analyze all paths (main + dependencies)
-    for path in &all_paths {
+    for path in &paths {
         let files = find_analyzable_files(path)
             .with_context(|| format!("Failed to find analyzable files in {}", path.display()))?;
 

@@ -1,5 +1,4 @@
 use anyhow::{Context, Result};
-use clap::Parser;
 use ruff_python_ast::{Expr, Stmt};
 use ruff_python_parser::parse_module;
 use serde::{Deserialize, Serialize};
@@ -7,25 +6,6 @@ use serde_yaml::Value;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-
-#[derive(Parser, Debug)]
-#[command(
-    name = "callgraph",
-    version = "1.0",
-    about = "Generates a call graph for a Python library"
-)]
-struct Args {
-    /// Path to the top-level folder of the Python library
-    path: PathBuf,
-
-    /// Show only the specified function (optional)
-    #[arg(short, long)]
-    function: Option<String>,
-
-    /// Additional dependency module paths to analyze (can be used multiple times)
-    #[arg(short, long)]
-    dependency: Vec<PathBuf>,
-}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CallGraph {
