@@ -61,11 +61,19 @@ impl CallGraphBuilder {
         // Derive module path relative to the library root
         let parent_lib_root = lib_root.parent().unwrap_or(lib_root);
         if let Some(relative_path) = file_path.strip_prefix(parent_lib_root).ok() {
-            relative_path
+            let mut module_name = relative_path
                 .to_str()
                 .unwrap_or("")
                 .replace(std::path::MAIN_SEPARATOR, ".")
-                .replace(".py", "")
+                .replace(".py", "");
+            
+            // Remove .__init__ suffix for package __init__.py files
+            // In Python, you import the package, not the __init__ file
+            if module_name.ends_with(".__init__") {
+                module_name = module_name.strip_suffix(".__init__").unwrap_or(&module_name).to_string();
+            }
+            
+            module_name
         } else {
             file_path.to_str().unwrap_or("").to_string()
         }
