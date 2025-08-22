@@ -22,6 +22,10 @@ struct Args {
     /// Show only the specified function (optional)
     #[arg(short, long)]
     function: Option<String>,
+
+    /// Additional dependency module paths to analyze (can be used multiple times)
+    #[arg(short, long)]
+    dependency: Vec<PathBuf>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -44,6 +48,7 @@ struct FunctionInfo {
 struct ResolvedCall {
     name: String,
     module: Option<String>,
+    path: Option<String>,
 }
 
 struct CallGraphBuilder {
@@ -208,10 +213,11 @@ impl CallGraphBuilder {
                     .collect();
 
                 // Resolve calls to modules (only keep those that can be resolved)
+                // Note: Path resolution will be done later after all functions are analyzed
                 let resolved_calls = calls
                     .iter()
                     .filter_map(|call| {
-                        let resolved = self.resolve_call(call);
+                        let resolved = self.resolve_call_module_only(call);
                         if resolved.module.is_some() {
                             Some(resolved)
                         } else {
@@ -251,10 +257,11 @@ impl CallGraphBuilder {
                             .collect();
 
                         // Resolve calls to modules (only keep those that can be resolved)
+                        // Note: Path resolution will be done later after all functions are analyzed
                         let resolved_calls = calls
                             .iter()
                             .filter_map(|call| {
-                                let resolved = self.resolve_call(call);
+                                let resolved = self.resolve_call_module_only(call);
                                 if resolved.module.is_some() {
                                     Some(resolved)
                                 } else {
@@ -383,24 +390,30 @@ impl CallGraphBuilder {
         }
     }
 
-    fn resolve_call(&self, call_name: &str) -> ResolvedCall {
+    fn resolve_call_module_only(&self, call_name: &str) -> ResolvedCall {
         // Check if the call starts with a known import
         if let Some(dot_pos) = call_name.find('.') {
             let prefix = &call_name[..dot_pos];
             let function_name = &call_name[dot_pos + 1..];
             if let Some(module_path) = self.imports.get(prefix) {
+                let full_module = format!("{}.{}", module_path, function_name);
+                
                 return ResolvedCall {
                     name: function_name.to_string(),
-                    module: Some(format!("{}.{}", module_path, function_name)),
+                    module: Some(full_module),
+                    path: None, // Will be resolved later
                 };
             }
         }
 
         // Check if the entire call name is an imported module/function
         if let Some(module_path) = self.imports.get(call_name) {
+            let path = self.find_function_path(call_name, module_path);
+            
             return ResolvedCall {
                 name: call_name.to_string(),
                 module: Some(module_path.clone()),
+                path,
             };
         }
 
@@ -408,7 +421,26 @@ impl CallGraphBuilder {
         ResolvedCall {
             name: call_name.to_string(),
             module: None,
+            path: None,
         }
+    }
+
+    fn find_function_path(&self, function_name: &str, expected_module: &str) -> Option<String> {
+        // Look for the function in our analyzed functions
+        // We need to check if any function matches the expected module pattern
+        for (_, func_info) in &self.functions {
+            if func_info.name == function_name && func_info.module.contains(expected_module) {
+                return Some(func_info.file.clone());
+            }
+            // Also check if the function's module ends with the expected module
+            if func_info.name == function_name && func_info.module.ends_with(&format!(".{}", function_name)) {
+                let module_prefix = func_info.module.strip_suffix(&format!(".{}", function_name)).unwrap_or("");
+                if expected_module.contains(module_prefix) || module_prefix.contains(expected_module) {
+                    return Some(func_info.file.clone());
+                }
+            }
+        }
+        None
     }
 
     fn build_call_graph(self) -> CallGraph {
@@ -449,19 +481,46 @@ fn main() -> Result<()> {
         anyhow::bail!("Path is not a directory: {}", args.path.display());
     }
 
-    let files = find_analyzable_files(&args.path)
-        .with_context(|| format!("Failed to find analyzable files in {}", args.path.display()))?;
-
-    if files.is_empty() {
-        anyhow::bail!("No Python or YAML files found in {}", args.path.display());
+    // Collect all paths to analyze (main path + dependencies)
+    let mut all_paths = vec![args.path.clone()];
+    for dep_path in &args.dependency {
+        if !dep_path.exists() {
+            eprintln!(
+                "Warning: Dependency path does not exist: {}",
+                dep_path.display()
+            );
+            continue;
+        }
+        if !dep_path.is_dir() {
+            eprintln!(
+                "Warning: Dependency path is not a directory: {}",
+                dep_path.display()
+            );
+            continue;
+        }
+        all_paths.push(dep_path.clone());
     }
 
     let mut builder = CallGraphBuilder::new();
 
-    for file_path in files {
-        if let Err(e) = builder.analyze_file(&file_path) {
-            eprintln!("Warning: Failed to analyze {}: {}", file_path.display(), e);
+    // Analyze all paths (main + dependencies)
+    for path in &all_paths {
+        let files = find_analyzable_files(path)
+            .with_context(|| format!("Failed to find analyzable files in {}", path.display()))?;
+
+        if files.is_empty() {
+            eprintln!(
+                "Warning: No Python or YAML files found in {}",
+                path.display()
+            );
             continue;
+        }
+
+        for file_path in files {
+            if let Err(e) = builder.analyze_file(&file_path) {
+                eprintln!("Warning: Failed to analyze {}: {}", file_path.display(), e);
+                continue;
+            }
         }
     }
 
