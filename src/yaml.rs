@@ -4,7 +4,7 @@ use std::fs;
 use std::path::Path;
 
 use crate::builder::CallGraphBuilder;
-use crate::schema::FunctionInfo;
+use crate::schema::{FunctionInfo, ModuleInfo};
 
 pub fn analyze_yaml_file(
     builder: &mut CallGraphBuilder,
@@ -37,18 +37,22 @@ pub fn analyze_yaml_file(
     }
 
     // YAML files don't have decorators or resolvable calls (no imports)
-    let module_path = derive_module(file_path, lib_root);
+    let module_name = derive_module(file_path, lib_root);
     let func_info = FunctionInfo {
         name: func_name.to_string(),
-        module: module_path,
-        file: builder.current_file.clone(),
-        line: 1, // YAML files start at line 1
+        module: module_name.clone(),
+        line: 1,
         calls,
         decorators: vec!["yaml".to_string()],
         resolved_calls: Vec::new(),
     };
+    let mod_info = ModuleInfo {
+        name: module_name.clone(),
+        path: builder.current_file.clone(),
+    };
 
-    builder.functions.insert(func_name.to_string(), func_info);
+    builder.functions.insert(func_info.name.clone(), func_info);
+    builder.modules.insert(mod_info.name.clone(), mod_info);
     Ok(())
 }
 

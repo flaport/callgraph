@@ -3,11 +3,12 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use crate::py::analyze_python_file;
-use crate::schema::{CallGraph, FunctionInfo, ResolvedCall};
+use crate::schema::{CallGraph, FunctionInfo, ModuleInfo, ResolvedCall};
 use crate::yaml::analyze_yaml_file;
 
 pub struct CallGraphBuilder {
     pub functions: HashMap<String, FunctionInfo>,
+    pub modules: HashMap<String, ModuleInfo>,
     pub current_file: String,
     pub current_file_path: PathBuf,
     pub imports: HashMap<String, String>, // alias -> full_module_path
@@ -17,6 +18,7 @@ impl CallGraphBuilder {
     pub fn new() -> Self {
         Self {
             functions: HashMap::new(),
+            modules: HashMap::new(),
             current_file: String::new(),
             current_file_path: PathBuf::new(),
             imports: HashMap::new(),
@@ -115,14 +117,18 @@ impl CallGraphBuilder {
                 let func_info = FunctionInfo {
                     name: func_name.clone(),
                     module: format!("{}.{}", module_path, func_name),
-                    file: self.current_file.clone(),
                     line: func_def.range.start().to_usize(),
                     calls,
                     decorators,
                     resolved_calls,
                 };
+                let mod_info = ModuleInfo {
+                    name: func_info.module.clone(),
+                    path: self.current_file.clone(),
+                };
 
-                self.functions.insert(func_name, func_info);
+                self.functions.insert(func_info.name.clone(), func_info);
+                self.modules.insert(mod_info.name.clone(), mod_info);
             }
             Stmt::ClassDef(class_def) => {
                 for class_stmt in &class_def.body {
@@ -159,14 +165,18 @@ impl CallGraphBuilder {
                         let func_info = FunctionInfo {
                             name: full_method_name.clone(),
                             module: format!("{}.{}", module_path, full_method_name),
-                            file: self.current_file.clone(),
                             line: method_def.range.start().to_usize(),
                             calls,
                             decorators,
                             resolved_calls,
                         };
+                        let mod_info = ModuleInfo {
+                            name: func_info.module.clone(),
+                            path: self.current_file.clone(),
+                        };
 
-                        self.functions.insert(full_method_name, func_info);
+                        self.functions.insert(func_info.name.clone(), func_info);
+                        self.modules.insert(mod_info.name.clone(), mod_info);
                     }
                 }
             }
@@ -315,7 +325,7 @@ impl CallGraphBuilder {
         // We need to check if any function matches the expected module pattern
         for (_, func_info) in &self.functions {
             if func_info.name == function_name && func_info.module.contains(expected_module) {
-                return Some(func_info.file.clone());
+                return Some(self.modules.get(&func_info.module)?.path.clone());
             }
             // Also check if the function's module ends with the expected module
             if func_info.name == function_name
@@ -328,7 +338,7 @@ impl CallGraphBuilder {
                 if expected_module.contains(module_prefix)
                     || module_prefix.contains(expected_module)
                 {
-                    return Some(func_info.file.clone());
+                    return Some(self.modules.get(&func_info.module)?.path.clone());
                 }
             }
         }
@@ -338,6 +348,7 @@ impl CallGraphBuilder {
     pub fn build_callgraph(self) -> CallGraph {
         CallGraph {
             functions: self.functions,
+            modules: self.modules,
         }
     }
 }
