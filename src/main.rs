@@ -35,11 +35,19 @@ struct FunctionInfo {
     line: usize,
     calls: Vec<String>,
     decorators: Vec<String>,
+    resolved_calls: Vec<ResolvedCall>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct ResolvedCall {
+    name: String,
+    module: Option<String>,
 }
 
 struct CallGraphBuilder {
     functions: HashMap<String, FunctionInfo>,
     current_file: String,
+    imports: HashMap<String, String>, // alias -> full_module_path
 }
 
 impl CallGraphBuilder {
@@ -47,6 +55,7 @@ impl CallGraphBuilder {
         Self {
             functions: HashMap::new(),
             current_file: String::new(),
+            imports: HashMap::new(),
         }
     }
 
@@ -55,6 +64,9 @@ impl CallGraphBuilder {
             .with_context(|| format!("Failed to read file: {}", file_path.display()))?;
 
         self.current_file = file_path.display().to_string();
+
+        // Clear imports for each new file
+        self.imports.clear();
 
         let parsed = parse_module(&content).map_err(|e| {
             anyhow::anyhow!(
@@ -76,6 +88,32 @@ impl CallGraphBuilder {
 
     fn visit_stmt(&mut self, stmt: &Stmt) {
         match stmt {
+            Stmt::Import(import_stmt) => {
+                for alias in &import_stmt.names {
+                    let module_name = alias.name.to_string();
+                    let alias_name = alias
+                        .asname
+                        .as_ref()
+                        .map(|name| name.to_string())
+                        .unwrap_or_else(|| module_name.clone());
+                    self.imports.insert(alias_name, module_name);
+                }
+            }
+            Stmt::ImportFrom(import_from_stmt) => {
+                if let Some(module) = &import_from_stmt.module {
+                    let module_name = module.to_string();
+                    for alias in &import_from_stmt.names {
+                        let imported_name = alias.name.to_string();
+                        let alias_name = alias
+                            .asname
+                            .as_ref()
+                            .map(|name| name.to_string())
+                            .unwrap_or_else(|| imported_name.clone());
+                        let full_path = format!("{}.{}", module_name, imported_name);
+                        self.imports.insert(alias_name, full_path);
+                    }
+                }
+            }
             Stmt::FunctionDef(func_def) => {
                 let func_name = func_def.name.to_string();
                 let mut calls = Vec::new();
@@ -91,12 +129,16 @@ impl CallGraphBuilder {
                     .filter_map(|decorator| self.get_decorator_name(decorator))
                     .collect();
 
+                // Resolve calls to modules
+                let resolved_calls = calls.iter().map(|call| self.resolve_call(call)).collect();
+
                 let func_info = FunctionInfo {
                     name: func_name.clone(),
                     file: self.current_file.clone(),
                     line: func_def.range.start().to_usize(),
                     calls,
                     decorators,
+                    resolved_calls,
                 };
 
                 self.functions.insert(func_name, func_info);
@@ -118,12 +160,17 @@ impl CallGraphBuilder {
                             .filter_map(|decorator| self.get_decorator_name(decorator))
                             .collect();
 
+                        // Resolve calls to modules
+                        let resolved_calls =
+                            calls.iter().map(|call| self.resolve_call(call)).collect();
+
                         let func_info = FunctionInfo {
                             name: full_method_name.clone(),
                             file: self.current_file.clone(),
                             line: method_def.range.start().to_usize(),
                             calls,
                             decorators,
+                            resolved_calls,
                         };
 
                         self.functions.insert(full_method_name, func_info);
@@ -175,11 +222,16 @@ impl CallGraphBuilder {
                     calls.push(func_name);
                 }
 
+                // Recursively process the function being called (for method chains)
+                self.extract_calls_from_expr(&call_expr.func, calls);
+
+                // Process arguments
                 for arg in &call_expr.arguments.args {
                     self.extract_calls_from_expr(arg, calls);
                 }
             }
             Expr::Attribute(attr_expr) => {
+                // Recursively process the value part of the attribute access
                 self.extract_calls_from_expr(&attr_expr.value, calls);
             }
             Expr::BinOp(binop_expr) => {
@@ -227,6 +279,33 @@ impl CallGraphBuilder {
                 }
             }
             _ => None,
+        }
+    }
+
+    fn resolve_call(&self, call_name: &str) -> ResolvedCall {
+        // Check if the call starts with a known import
+        if let Some(dot_pos) = call_name.find('.') {
+            let prefix = &call_name[..dot_pos];
+            if let Some(module_path) = self.imports.get(prefix) {
+                return ResolvedCall {
+                    name: call_name.to_string(),
+                    module: Some(module_path.clone()),
+                };
+            }
+        }
+
+        // Check if the entire call name is an imported module/function
+        if let Some(module_path) = self.imports.get(call_name) {
+            return ResolvedCall {
+                name: call_name.to_string(),
+                module: Some(module_path.clone()),
+            };
+        }
+
+        // No module resolution found
+        ResolvedCall {
+            name: call_name.to_string(),
+            module: None,
         }
     }
 
