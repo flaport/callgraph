@@ -37,7 +37,7 @@ pub fn analyze_yaml_file(
     }
 
     // YAML files don't have decorators or resolvable calls (no imports)
-    let module_name = derive_module(file_path, lib_root);
+    let module_name = derive_yaml_module(file_path, lib_root);
     let func_info = FunctionInfo {
         name: func_name.to_string(),
         module: module_name.clone(),
@@ -56,7 +56,7 @@ pub fn analyze_yaml_file(
     Ok(())
 }
 
-fn derive_module(file_path: &Path, lib_root: &Path) -> String {
+fn derive_yaml_module(file_path: &Path, lib_root: &Path) -> String {
     // Derive module path relative to the library root
     let parent_lib_root = lib_root.parent().unwrap_or(lib_root);
     if let Some(relative_path) = file_path.strip_prefix(parent_lib_root).ok() {

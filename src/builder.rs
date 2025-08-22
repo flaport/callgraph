@@ -34,29 +34,27 @@ impl CallGraphBuilder {
         if file_name.ends_with(".pic.yml") {
             analyze_yaml_file(self, file_path, lib_root)
         } else if file_path.extension().map_or(false, |ext| ext == "py") {
-            analyze_python_file(self, file_path)
+            analyze_python_file(self, file_path, lib_root)
         } else {
             Ok(())
         }
     }
 
-    pub fn derive_module_path(&self, file_path: &Path) -> String {
-        let path_str = file_path.display().to_string();
-
-        // Remove file extension
-        let without_extension = if path_str.ends_with(".py") {
-            path_str.strip_suffix(".py").unwrap_or(&path_str)
-        } else if path_str.ends_with(".pic.yml") {
-            path_str.strip_suffix(".pic.yml").unwrap_or(&path_str)
+    pub fn derive_module(&self, file_path: &Path, lib_root: &Path) -> String {
+        // Derive module path relative to the library root
+        let parent_lib_root = lib_root.parent().unwrap_or(lib_root);
+        if let Some(relative_path) = file_path.strip_prefix(parent_lib_root).ok() {
+            relative_path
+                .to_str()
+                .unwrap_or("")
+                .replace(std::path::MAIN_SEPARATOR, ".")
+                .replace(".py", "")
         } else {
-            &path_str
-        };
-
-        // Convert path separators to dots for module notation
-        without_extension.replace('/', ".").replace('\\', ".")
+            file_path.to_str().unwrap_or("").to_string()
+        }
     }
 
-    pub fn visit_stmt(&mut self, stmt: &Stmt) {
+    pub fn visit_stmt(&mut self, stmt: &Stmt, lib_root: &Path) {
         match stmt {
             Stmt::Import(import_stmt) => {
                 for alias in &import_stmt.names {
@@ -113,7 +111,7 @@ impl CallGraphBuilder {
                     })
                     .collect();
 
-                let module_path = self.derive_module_path(&self.current_file_path);
+                let module_path = self.derive_module(&self.current_file_path, lib_root);
                 let func_info = FunctionInfo {
                     name: func_name.clone(),
                     module: format!("{}.{}", module_path, func_name),
@@ -161,7 +159,7 @@ impl CallGraphBuilder {
                             })
                             .collect();
 
-                        let module_path = self.derive_module_path(&self.current_file_path);
+                        let module_path = self.derive_module(&self.current_file_path, lib_root);
                         let func_info = FunctionInfo {
                             name: full_method_name.clone(),
                             module: format!("{}.{}", module_path, full_method_name),

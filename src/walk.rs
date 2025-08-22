@@ -12,6 +12,7 @@ pub fn find_analyzable_files(dir: &Path) -> anyhow::Result<Vec<PathBuf>> {
 
         if path.is_file() {
             let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+
             if path.extension().map_or(false, |ext| ext == "py") || file_name.ends_with(".pic.yml")
             {
                 files.push(path.to_path_buf());

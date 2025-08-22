@@ -5,7 +5,11 @@ use std::path::Path;
 
 use crate::builder::CallGraphBuilder;
 
-pub fn analyze_python_file(builder: &mut CallGraphBuilder, file_path: &Path) -> anyhow::Result<()> {
+pub fn analyze_python_file(
+    builder: &mut CallGraphBuilder,
+    file_path: &Path,
+    lib_root: &Path,
+) -> anyhow::Result<()> {
     let content = fs::read_to_string(file_path)
         .with_context(|| format!("Failed to read file: {}", file_path.display()))?;
 
@@ -24,7 +28,7 @@ pub fn analyze_python_file(builder: &mut CallGraphBuilder, file_path: &Path) -> 
     let module = parsed.into_syntax();
 
     for stmt in &module.body {
-        builder.visit_stmt(stmt);
+        builder.visit_stmt(stmt, lib_root);
     }
 
     Ok(())
