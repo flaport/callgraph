@@ -1,10 +1,8 @@
-use anyhow::Context;
 use ruff_python_ast::{Expr, Stmt};
-use ruff_python_parser::parse_module;
 use std::collections::HashMap;
-use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::py::analyze_python_file;
 use crate::schema::{CallGraph, FunctionInfo, ResolvedCall};
 use crate::yaml::analyze_yaml_file;
 
@@ -34,7 +32,7 @@ impl CallGraphBuilder {
         if file_name.ends_with(".pic.yml") {
             analyze_yaml_file(self, file_path, lib_root)
         } else if file_path.extension().map_or(false, |ext| ext == "py") {
-            self.analyze_python_file(file_path)
+            analyze_python_file(self, file_path)
         } else {
             Ok(())
         }
@@ -56,32 +54,7 @@ impl CallGraphBuilder {
         without_extension.replace('/', ".").replace('\\', ".")
     }
 
-    fn analyze_python_file(&mut self, file_path: &Path) -> anyhow::Result<()> {
-        let content = fs::read_to_string(file_path)
-            .with_context(|| format!("Failed to read file: {}", file_path.display()))?;
-
-        // Clear imports for each new file
-        self.imports.clear();
-
-        let parsed = parse_module(&content).map_err(|e| {
-            anyhow::anyhow!(
-                "Failed to parse Python file {}: {:?}",
-                file_path.display(),
-                e
-            )
-        })?;
-
-        // Extract the module from the parsed result
-        let module = parsed.into_syntax();
-
-        for stmt in &module.body {
-            self.visit_stmt(stmt);
-        }
-
-        Ok(())
-    }
-
-    fn visit_stmt(&mut self, stmt: &Stmt) {
+    pub fn visit_stmt(&mut self, stmt: &Stmt) {
         match stmt {
             Stmt::Import(import_stmt) => {
                 for alias in &import_stmt.names {
