@@ -13,6 +13,15 @@ pub fn find_analyzable_files(dir: &Path) -> anyhow::Result<Vec<PathBuf>> {
         if path.is_file() {
             let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
 
+            // Skip paths that contain dot-folders (e.g. .git, .venv)
+            if path.components().any(|comp| {
+                comp.as_os_str()
+                    .to_str()
+                    .map_or(false, |s| s.starts_with("."))
+            }) {
+                continue;
+            }
+
             if path.extension().map_or(false, |ext| ext == "py") || file_name.ends_with(".pic.yml")
             {
                 files.push(path.to_path_buf());
