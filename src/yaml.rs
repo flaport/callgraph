@@ -3,8 +3,8 @@ use serde_yaml::Value;
 use std::fs;
 use std::path::Path;
 
-use super::callgraph::CallGraphBuilder;
-use super::schema::FunctionInfo;
+use crate::builder::CallGraphBuilder;
+use crate::schema::FunctionInfo;
 
 pub fn analyze_yaml_file(
     builder: &mut CallGraphBuilder,

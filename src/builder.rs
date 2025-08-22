@@ -5,8 +5,8 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use super::schema::{CallGraph, FunctionInfo, ResolvedCall};
-use super::yaml::analyze_yaml_file;
+use crate::schema::{CallGraph, FunctionInfo, ResolvedCall};
+use crate::yaml::analyze_yaml_file;
 
 pub struct CallGraphBuilder {
     pub functions: HashMap<String, FunctionInfo>,

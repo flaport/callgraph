@@ -3,7 +3,7 @@ use clap::Parser;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use callgraph::callgraph::CallGraphBuilder;
+use callgraph::builder::CallGraphBuilder;
 use callgraph::walk::find_analyzable_files;
 
 #[derive(Parser, Debug)]
