@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 #[derive(Parser, Debug)]
 #[command(
-    name = "call_graph",
+    name = "callgraph",
     version = "1.0",
     about = "Generates a call graph for a Python library"
 )]
@@ -449,7 +449,7 @@ impl CallGraphBuilder {
         None
     }
 
-    pub fn build_call_graph(self) -> CallGraph {
+    pub fn build_callgraph(self) -> CallGraph {
         CallGraph {
             functions: self.functions,
         }

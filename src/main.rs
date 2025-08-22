@@ -3,12 +3,12 @@ use clap::Parser;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use call_graph::callgraph::CallGraphBuilder;
-use call_graph::walk::find_analyzable_files;
+use callgraph::callgraph::CallGraphBuilder;
+use callgraph::walk::find_analyzable_files;
 
 #[derive(Parser, Debug)]
 #[command(
-    name = "call_graph",
+    name = "callgraph",
     version = "1.0",
     about = "Generates a call graph for a Python library"
 )]
@@ -79,20 +79,20 @@ fn main() -> Result<()> {
         }
     }
 
-    let mut call_graph = builder.build_call_graph();
+    let mut callgraph = builder.build_callgraph();
 
     // Filter to specific function if requested
     if let Some(function_name) = &args.function {
-        if let Some(func_info) = call_graph.functions.get(function_name) {
+        if let Some(func_info) = callgraph.functions.get(function_name) {
             let mut filtered_functions = HashMap::new();
             filtered_functions.insert(function_name.clone(), func_info.clone());
-            call_graph.functions = filtered_functions;
+            callgraph.functions = filtered_functions;
         } else {
             anyhow::bail!("Function '{}' not found in the call graph", function_name);
         }
     }
 
-    let json_output = serde_json::to_string_pretty(&call_graph)
+    let json_output = serde_json::to_string_pretty(&callgraph)
         .context("Failed to serialize call graph to JSON")?;
 
     println!("{}", json_output);
