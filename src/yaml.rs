@@ -4,7 +4,7 @@ use std::fs;
 use std::path::Path;
 
 use crate::builder::CallGraphBuilder;
-use crate::schema::{FunctionInfo, ModuleInfo};
+use crate::schema::FunctionInfo;
 
 pub fn analyze_yaml_file(
     builder: &mut CallGraphBuilder,
@@ -46,13 +46,11 @@ pub fn analyze_yaml_file(
         decorators: vec!["yaml".to_string()],
         resolved_calls: Vec::new(),
     };
-    let mod_info = ModuleInfo {
-        name: module_name.clone(),
-        path: builder.current_file.clone(),
-    };
+
+    // Add function to module's function list
+    builder.add_function_to_module(&module_name, func_name);
 
     builder.functions.insert(func_info.name.clone(), func_info);
-    builder.modules.insert(mod_info.name.clone(), mod_info);
     Ok(())
 }
 

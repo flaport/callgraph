@@ -21,4 +21,5 @@ pub struct FunctionInfo {
 pub struct ModuleInfo {
     pub name: String,
     pub path: String,
+    pub functions: Vec<String>,
 }

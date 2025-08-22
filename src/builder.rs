@@ -40,6 +40,23 @@ impl CallGraphBuilder {
         }
     }
 
+    pub fn add_function_to_module(&mut self, module_name: &str, function_name: &str) {
+        if let Some(module_info) = self.modules.get_mut(module_name) {
+            // Module exists, add function if not already present
+            if !module_info.functions.contains(&function_name.to_string()) {
+                module_info.functions.push(function_name.to_string());
+            }
+        } else {
+            // Create new module
+            let module_info = ModuleInfo {
+                name: module_name.to_string(),
+                path: self.current_file.clone(),
+                functions: vec![function_name.to_string()],
+            };
+            self.modules.insert(module_name.to_string(), module_info);
+        }
+    }
+
     pub fn derive_module(&self, file_path: &Path, lib_root: &Path) -> String {
         // Derive module path relative to the library root
         let parent_lib_root = lib_root.parent().unwrap_or(lib_root);
@@ -103,19 +120,17 @@ impl CallGraphBuilder {
                 let module_path = self.derive_module(&self.current_file_path, lib_root);
                 let func_info = FunctionInfo {
                     name: func_name.clone(),
-                    module: format!("{}.{}", module_path, func_name),
+                    module: module_path.clone(),
                     line: func_def.range.start().to_usize(),
                     calls,
                     decorators,
                     resolved_calls,
                 };
-                let mod_info = ModuleInfo {
-                    name: func_info.module.clone(),
-                    path: self.current_file.clone(),
-                };
+
+                // Add function to module's function list
+                self.add_function_to_module(&module_path, &func_name);
 
                 self.functions.insert(func_info.name.clone(), func_info);
-                self.modules.insert(mod_info.name.clone(), mod_info);
             }
             Stmt::ClassDef(class_def) => {
                 for class_stmt in &class_def.body {
@@ -140,19 +155,17 @@ impl CallGraphBuilder {
                         let module_path = self.derive_module(&self.current_file_path, lib_root);
                         let func_info = FunctionInfo {
                             name: full_method_name.clone(),
-                            module: format!("{}.{}", module_path, full_method_name),
+                            module: module_path.clone(),
                             line: method_def.range.start().to_usize(),
                             calls,
                             decorators,
                             resolved_calls,
                         };
-                        let mod_info = ModuleInfo {
-                            name: func_info.module.clone(),
-                            path: self.current_file.clone(),
-                        };
+
+                        // Add function to module's function list
+                        self.add_function_to_module(&module_path, &full_method_name);
 
                         self.functions.insert(func_info.name.clone(), func_info);
-                        self.modules.insert(mod_info.name.clone(), mod_info);
                     }
                 }
             }
