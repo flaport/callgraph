@@ -1,12 +1,12 @@
 use anyhow::Context;
 use ruff_python_ast::{Expr, Stmt};
 use ruff_python_parser::parse_module;
-use serde_yaml::Value;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use super::schema::{CallGraph, FunctionInfo, ResolvedCall};
+use super::yaml::analyze_yaml_file;
 
 pub struct CallGraphBuilder {
     pub functions: HashMap<String, FunctionInfo>,
@@ -25,6 +25,21 @@ impl CallGraphBuilder {
         }
     }
 
+    pub fn analyze_file(&mut self, file_path: &Path) -> anyhow::Result<()> {
+        self.current_file = file_path.display().to_string();
+        self.current_file_path = file_path.to_path_buf();
+
+        let file_name = file_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+
+        if file_name.ends_with(".pic.yml") {
+            analyze_yaml_file(self, file_path)
+        } else if file_path.extension().map_or(false, |ext| ext == "py") {
+            self.analyze_python_file(file_path)
+        } else {
+            Ok(())
+        }
+    }
+
     pub fn derive_module_path(&self, file_path: &Path) -> String {
         let path_str = file_path.display().to_string();
 
@@ -39,21 +54,6 @@ impl CallGraphBuilder {
 
         // Convert path separators to dots for module notation
         without_extension.replace('/', ".").replace('\\', ".")
-    }
-
-    pub fn analyze_file(&mut self, file_path: &Path) -> anyhow::Result<()> {
-        self.current_file = file_path.display().to_string();
-        self.current_file_path = file_path.to_path_buf();
-
-        let file_name = file_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-
-        if file_name.ends_with(".pic.yml") {
-            self.analyze_yaml_file(file_path)
-        } else if file_path.extension().map_or(false, |ext| ext == "py") {
-            self.analyze_python_file(file_path)
-        } else {
-            Ok(())
-        }
     }
 
     fn analyze_python_file(&mut self, file_path: &Path) -> anyhow::Result<()> {
@@ -78,51 +78,6 @@ impl CallGraphBuilder {
             self.visit_stmt(stmt);
         }
 
-        Ok(())
-    }
-
-    fn analyze_yaml_file(&mut self, file_path: &Path) -> anyhow::Result<()> {
-        let content = fs::read_to_string(file_path)
-            .with_context(|| format!("Failed to read YAML file: {}", file_path.display()))?;
-
-        let yaml: Value = serde_yaml::from_str(&content)
-            .with_context(|| format!("Failed to parse YAML file: {}", file_path.display()))?;
-
-        // Extract function name from file name (remove .pic.yml extension)
-        let file_name = file_path
-            .file_stem()
-            .and_then(|n| n.to_str())
-            .unwrap_or("unknown");
-        let func_name = file_name.strip_suffix(".pic").unwrap_or(file_name);
-
-        let mut calls = Vec::new();
-
-        // Extract component calls from instances
-        if let Some(instances) = yaml.get("instances") {
-            if let Some(instances_map) = instances.as_mapping() {
-                for (_, instance) in instances_map {
-                    if let Some(component) = instance.get("component") {
-                        if let Some(component_name) = component.as_str() {
-                            calls.push(component_name.to_string());
-                        }
-                    }
-                }
-            }
-        }
-
-        // YAML files don't have decorators or resolvable calls (no imports)
-        let module_path = self.derive_module_path(file_path);
-        let func_info = FunctionInfo {
-            name: func_name.to_string(),
-            module: module_path,
-            file: self.current_file.clone(),
-            line: 1, // YAML files start at line 1
-            calls,
-            decorators: Vec::new(),
-            resolved_calls: Vec::new(),
-        };
-
-        self.functions.insert(func_name.to_string(), func_info);
         Ok(())
     }
 
