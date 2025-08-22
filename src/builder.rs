@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use crate::py::analyze_python_file;
-use crate::schema::{CallGraph, FunctionInfo, ModuleInfo, ResolvedCall};
+use crate::schema::{CallGraph, FunctionInfo, ModuleInfo};
 use crate::yaml::analyze_yaml_file;
 
 pub struct CallGraphBuilder {
@@ -97,19 +97,8 @@ impl CallGraphBuilder {
                     .filter_map(|decorator| self.get_decorator_name(decorator))
                     .collect();
 
-                // Resolve calls to modules (only keep those that can be resolved)
-                // Note: Path resolution will be done later after all functions are analyzed
-                let resolved_calls = calls
-                    .iter()
-                    .filter_map(|call| {
-                        let resolved = self.resolve_call_module_only(call);
-                        if resolved.module.is_some() {
-                            Some(resolved)
-                        } else {
-                            None
-                        }
-                    })
-                    .collect();
+                // Defer resolution until all functions are analyzed
+                let resolved_calls = Vec::new();
 
                 let module_path = self.derive_module(&self.current_file_path, lib_root);
                 let func_info = FunctionInfo {
@@ -145,19 +134,8 @@ impl CallGraphBuilder {
                             .filter_map(|decorator| self.get_decorator_name(decorator))
                             .collect();
 
-                        // Resolve calls to modules (only keep those that can be resolved)
-                        // Note: Path resolution will be done later after all functions are analyzed
-                        let resolved_calls = calls
-                            .iter()
-                            .filter_map(|call| {
-                                let resolved = self.resolve_call_module_only(call);
-                                if resolved.module.is_some() {
-                                    Some(resolved)
-                                } else {
-                                    None
-                                }
-                            })
-                            .collect();
+                        // Defer resolution until all functions are analyzed
+                        let resolved_calls = Vec::new();
 
                         let module_path = self.derive_module(&self.current_file_path, lib_root);
                         let func_info = FunctionInfo {
@@ -283,70 +261,135 @@ impl CallGraphBuilder {
         }
     }
 
-    fn resolve_call_module_only(&self, call_name: &str) -> ResolvedCall {
+    fn resolve_call_to_definition(&self, call_name: &str) -> Option<String> {
         // Check if the call starts with a known import
         if let Some(dot_pos) = call_name.find('.') {
             let prefix = &call_name[..dot_pos];
             let function_name = &call_name[dot_pos + 1..];
             if let Some(module_path) = self.imports.get(prefix) {
-                let full_module = format!("{}.{}", module_path, function_name);
+                let expected_full_module = format!("{}.{}", module_path, function_name);
 
-                return ResolvedCall {
-                    name: function_name.to_string(),
-                    module: Some(full_module),
-                    path: None, // Will be resolved later
-                };
+                // Find the actual function definition in our analyzed functions
+                return self.find_function_definition(function_name, &expected_full_module);
             }
         }
 
         // Check if the entire call name is an imported module/function
         if let Some(module_path) = self.imports.get(call_name) {
-            let path = self.find_function_path(call_name, module_path);
-
-            return ResolvedCall {
-                name: call_name.to_string(),
-                module: Some(module_path.clone()),
-                path,
-            };
+            return self.find_function_definition(call_name, module_path);
         }
 
         // No module resolution found
-        ResolvedCall {
-            name: call_name.to_string(),
-            module: None,
-            path: None,
-        }
+        None
     }
 
-    fn find_function_path(&self, function_name: &str, expected_module: &str) -> Option<String> {
+    fn find_function_definition(
+        &self,
+        function_name: &str,
+        expected_module: &str,
+    ) -> Option<String> {
         // Look for the function in our analyzed functions
-        // We need to check if any function matches the expected module pattern
+        // Return format: {module}.{func} where module is where the function is defined
         for (_, func_info) in &self.functions {
-            if func_info.name == function_name && func_info.module.contains(expected_module) {
-                return Some(self.modules.get(&func_info.module)?.path.clone());
-            }
-            // Also check if the function's module ends with the expected module
-            if func_info.name == function_name
-                && func_info.module.ends_with(&format!(".{}", function_name))
-            {
-                let module_prefix = func_info
-                    .module
-                    .strip_suffix(&format!(".{}", function_name))
-                    .unwrap_or("");
-                if expected_module.contains(module_prefix)
-                    || module_prefix.contains(expected_module)
+            if func_info.name == function_name {
+                // Check various matching patterns for the expected module
+                if func_info.module.contains(expected_module)
+                    || expected_module.contains(&func_info.module)
+                    || self.modules_match(expected_module, &func_info.module)
                 {
-                    return Some(self.modules.get(&func_info.module)?.path.clone());
+                    return Some(format!("{}.{}", func_info.module, function_name));
                 }
             }
         }
         None
     }
 
-    pub fn build_callgraph(self) -> CallGraph {
+    fn modules_match(&self, expected: &str, actual: &str) -> bool {
+        // More sophisticated module matching logic
+        // Handle cases where the expected module might be a partial path
+
+        // Split modules into parts
+        let expected_parts: Vec<&str> = expected.split('.').collect();
+        let actual_parts: Vec<&str> = actual.split('.').collect();
+
+        // Check if the expected module is a suffix of the actual module
+        if expected_parts.len() <= actual_parts.len() {
+            let actual_suffix = &actual_parts[actual_parts.len() - expected_parts.len()..];
+            if expected_parts == actual_suffix {
+                return true;
+            }
+        }
+
+        // Check if they share common significant parts (e.g., package name and function)
+        if let (Some(expected_last), Some(actual_last)) =
+            (expected_parts.last(), actual_parts.last())
+        {
+            if expected_last == actual_last {
+                // Check if they share a common package structure
+                let expected_package = expected_parts.get(expected_parts.len().saturating_sub(2));
+                let actual_package = actual_parts.get(actual_parts.len().saturating_sub(2));
+                if expected_package.is_some() && expected_package == actual_package {
+                    return true;
+                }
+            }
+        }
+
+        false
+    }
+
+    pub fn build_callgraph(mut self) -> CallGraph {
+        // Now that all functions are analyzed, resolve the calls
+        self.resolve_all_calls();
+
         CallGraph {
             functions: self.functions,
             modules: self.modules,
         }
+    }
+
+    fn resolve_all_calls(&mut self) {
+        let functions_clone = self.functions.clone();
+
+        for (_, func_info) in self.functions.iter_mut() {
+            let mut resolved_calls = Vec::new();
+
+            for call in &func_info.calls {
+                if let Some(resolved) =
+                    Self::resolve_call_against_all_functions(call, &functions_clone)
+                {
+                    resolved_calls.push(resolved);
+                }
+            }
+
+            func_info.resolved_calls = resolved_calls;
+        }
+    }
+
+    fn resolve_call_against_all_functions(
+        call_name: &str,
+        all_functions: &HashMap<String, FunctionInfo>,
+    ) -> Option<String> {
+        // Simple resolution: look for functions with matching names
+        // This is a simplified approach - in a full implementation, we'd need to track imports per file
+
+        // Direct match - look for exact function name
+        for (_, func_info) in all_functions {
+            if func_info.name == call_name {
+                return Some(format!("{}.{}", func_info.module, func_info.name));
+            }
+        }
+
+        // Handle dotted calls like "cells.mzi" - look for function "mzi"
+        if let Some(dot_pos) = call_name.find('.') {
+            let function_name = &call_name[dot_pos + 1..];
+
+            for (_, func_info) in all_functions {
+                if func_info.name == function_name {
+                    return Some(format!("{}.{}", func_info.module, func_info.name));
+                }
+            }
+        }
+
+        None
     }
 }

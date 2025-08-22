@@ -14,18 +14,11 @@ pub struct FunctionInfo {
     pub line: usize,
     pub calls: Vec<String>,
     pub decorators: Vec<String>,
-    pub resolved_calls: Vec<ResolvedCall>,
+    pub resolved_calls: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ModuleInfo {
     pub name: String,
     pub path: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct ResolvedCall {
-    pub name: String,
-    pub module: Option<String>,
-    pub path: Option<String>,
 }
