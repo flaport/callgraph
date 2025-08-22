@@ -81,7 +81,15 @@ fn main() -> anyhow::Result<()> {
         if let Some(func_info) = callgraph.functions.get(function_name) {
             let mut filtered_functions = HashMap::new();
             filtered_functions.insert(function_name.clone(), func_info.clone());
+            let filtered_modules = filtered_functions
+                .iter()
+                .filter_map(|(_, ff)| callgraph.modules.get(&ff.module))
+                .collect::<Vec<_>>();
             callgraph.functions = filtered_functions;
+            callgraph.modules = filtered_modules
+                .into_iter()
+                .map(|m| (m.name.clone(), m.clone()))
+                .collect();
         } else {
             anyhow::bail!("Function '{}' not found in the call graph", function_name);
         }
