@@ -129,8 +129,18 @@ impl CallGraphBuilder {
                     .filter_map(|decorator| self.get_decorator_name(decorator))
                     .collect();
 
-                // Resolve calls to modules
-                let resolved_calls = calls.iter().map(|call| self.resolve_call(call)).collect();
+                // Resolve calls to modules (only keep those that can be resolved)
+                let resolved_calls = calls
+                    .iter()
+                    .filter_map(|call| {
+                        let resolved = self.resolve_call(call);
+                        if resolved.module.is_some() {
+                            Some(resolved)
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
 
                 let func_info = FunctionInfo {
                     name: func_name.clone(),
@@ -160,9 +170,18 @@ impl CallGraphBuilder {
                             .filter_map(|decorator| self.get_decorator_name(decorator))
                             .collect();
 
-                        // Resolve calls to modules
-                        let resolved_calls =
-                            calls.iter().map(|call| self.resolve_call(call)).collect();
+                        // Resolve calls to modules (only keep those that can be resolved)
+                        let resolved_calls = calls
+                            .iter()
+                            .filter_map(|call| {
+                                let resolved = self.resolve_call(call);
+                                if resolved.module.is_some() {
+                                    Some(resolved)
+                                } else {
+                                    None
+                                }
+                            })
+                            .collect();
 
                         let func_info = FunctionInfo {
                             name: full_method_name.clone(),
@@ -286,10 +305,11 @@ impl CallGraphBuilder {
         // Check if the call starts with a known import
         if let Some(dot_pos) = call_name.find('.') {
             let prefix = &call_name[..dot_pos];
+            let function_name = &call_name[dot_pos + 1..];
             if let Some(module_path) = self.imports.get(prefix) {
                 return ResolvedCall {
-                    name: call_name.to_string(),
-                    module: Some(module_path.clone()),
+                    name: function_name.to_string(),
+                    module: Some(format!("{}.{}", module_path, function_name)),
                 };
             }
         }
