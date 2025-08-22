@@ -52,6 +52,25 @@ impl CallGraphBuilder {
                 name: module_name.to_string(),
                 path: self.current_file.clone(),
                 functions: vec![function_name.to_string()],
+                imports: Vec::new(),
+            };
+            self.modules.insert(module_name.to_string(), module_info);
+        }
+    }
+
+    pub fn add_import_to_module(&mut self, module_name: &str, import: &str) {
+        if let Some(module_info) = self.modules.get_mut(module_name) {
+            // Module exists, add import if not already present
+            if !module_info.imports.contains(&import.to_string()) {
+                module_info.imports.push(import.to_string());
+            }
+        } else {
+            // Create new module with this import
+            let module_info = ModuleInfo {
+                name: module_name.to_string(),
+                path: self.current_file.clone(),
+                functions: Vec::new(),
+                imports: vec![import.to_string()],
             };
             self.modules.insert(module_name.to_string(), module_info);
         }
@@ -79,7 +98,44 @@ impl CallGraphBuilder {
         }
     }
 
+    pub fn resolve_relative_import(&self, relative_import: &str, current_module: &str) -> String {
+        // Handle relative imports like "from .cells import mzi" or "from ..cband import cells"
+        if relative_import.starts_with('.') {
+            let dots = relative_import.chars().take_while(|&c| c == '.').count();
+            let import_path = &relative_import[dots..];
+            
+            // Split current module into parts
+            let current_parts: Vec<&str> = current_module.split('.').collect();
+            
+            if dots > current_parts.len() {
+                // Can't go up more levels than we have
+                return relative_import.to_string();
+            }
+            
+            // Go up 'dots' levels from current module
+            let base_parts = &current_parts[..current_parts.len() - dots];
+            let base_module = base_parts.join(".");
+            
+            if import_path.is_empty() {
+                // Just "from ." - import the parent package
+                base_module
+            } else {
+                // "from .something" - combine base with import path
+                if base_module.is_empty() {
+                    import_path.to_string()
+                } else {
+                    format!("{}.{}", base_module, import_path)
+                }
+            }
+        } else {
+            // Not a relative import, return as-is
+            relative_import.to_string()
+        }
+    }
+
     pub fn visit_stmt(&mut self, stmt: &Stmt, lib_root: &Path) {
+        let current_module = self.derive_module(&self.current_file_path, lib_root);
+        
         match stmt {
             Stmt::Import(import_stmt) => {
                 for alias in &import_stmt.names {
@@ -89,12 +145,21 @@ impl CallGraphBuilder {
                         .as_ref()
                         .map(|name| name.to_string())
                         .unwrap_or_else(|| module_name.clone());
-                    self.imports.insert(alias_name, module_name);
+                    
+                    // Store in internal imports map for function resolution
+                    self.imports.insert(alias_name, module_name.clone());
+                    
+                    // Add absolute import to the current module's imports list
+                    self.add_import_to_module(&current_module, &module_name);
                 }
             }
             Stmt::ImportFrom(import_from_stmt) => {
                 if let Some(module) = &import_from_stmt.module {
                     let module_name = module.to_string();
+                    
+                    // Resolve relative imports to absolute
+                    let absolute_module = self.resolve_relative_import(&module_name, &current_module);
+                    
                     for alias in &import_from_stmt.names {
                         let imported_name = alias.name.to_string();
                         let alias_name = alias
@@ -102,8 +167,48 @@ impl CallGraphBuilder {
                             .as_ref()
                             .map(|name| name.to_string())
                             .unwrap_or_else(|| imported_name.clone());
-                        let full_path = format!("{}.{}", module_name, imported_name);
-                        self.imports.insert(alias_name, full_path);
+                        
+                        // Store in internal imports map for function resolution
+                        let full_path = format!("{}.{}", absolute_module, imported_name);
+                        self.imports.insert(alias_name, full_path.clone());
+                        
+                        // Add absolute import to the current module's imports list
+                        if imported_name == "*" {
+                            // Handle star imports
+                            let star_import = format!("{}.*", absolute_module);
+                            self.add_import_to_module(&current_module, &star_import);
+                        } else {
+                            self.add_import_to_module(&current_module, &full_path);
+                        }
+                    }
+                } else {
+                    // Handle relative imports without explicit module (e.g., "from . import something")
+                    // This means it's a relative import from the current package level
+                    for alias in &import_from_stmt.names {
+                        let imported_name = alias.name.to_string();
+                        let alias_name = alias
+                            .asname
+                            .as_ref()
+                            .map(|name| name.to_string())
+                            .unwrap_or_else(|| imported_name.clone());
+                        
+                        // This is a relative import from current package
+                        let absolute_import = if current_module.is_empty() {
+                            imported_name.clone()
+                        } else {
+                            format!("{}.{}", current_module, imported_name)
+                        };
+                        
+                        // Store in internal imports map for function resolution
+                        self.imports.insert(alias_name, absolute_import.clone());
+                        
+                        // Add absolute import to the current module's imports list
+                        if imported_name == "*" {
+                            let star_import = format!("{}.*", absolute_import.strip_suffix(".*").unwrap_or(&absolute_import));
+                            self.add_import_to_module(&current_module, &star_import);
+                        } else {
+                            self.add_import_to_module(&current_module, &absolute_import);
+                        }
                     }
                 }
             }

@@ -22,4 +22,5 @@ pub struct ModuleInfo {
     pub name: String,
     pub path: String,
     pub functions: Vec<String>,
+    pub imports: Vec<String>,
 }
