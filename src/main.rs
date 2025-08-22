@@ -34,6 +34,7 @@ struct FunctionInfo {
     file: String,
     line: usize,
     calls: Vec<String>,
+    decorators: Vec<String>,
 }
 
 struct CallGraphBuilder {
@@ -83,11 +84,19 @@ impl CallGraphBuilder {
                     self.extract_calls_from_stmt(body_stmt, &mut calls);
                 }
 
+                // Extract decorator names
+                let decorators = func_def
+                    .decorator_list
+                    .iter()
+                    .filter_map(|decorator| self.get_decorator_name(decorator))
+                    .collect();
+
                 let func_info = FunctionInfo {
                     name: func_name.clone(),
                     file: self.current_file.clone(),
                     line: func_def.range.start().to_usize(),
                     calls,
+                    decorators,
                 };
 
                 self.functions.insert(func_name, func_info);
@@ -102,11 +111,19 @@ impl CallGraphBuilder {
                             self.extract_calls_from_stmt(body_stmt, &mut calls);
                         }
 
+                        // Extract decorator names for methods
+                        let decorators = method_def
+                            .decorator_list
+                            .iter()
+                            .filter_map(|decorator| self.get_decorator_name(decorator))
+                            .collect();
+
                         let func_info = FunctionInfo {
                             name: full_method_name.clone(),
                             file: self.current_file.clone(),
                             line: method_def.range.start().to_usize(),
                             calls,
+                            decorators,
                         };
 
                         self.functions.insert(full_method_name, func_info);
@@ -191,6 +208,22 @@ impl CallGraphBuilder {
                     Some(format!("{}.{}", base, attr_expr.attr))
                 } else {
                     Some(attr_expr.attr.to_string())
+                }
+            }
+            _ => None,
+        }
+    }
+
+    fn get_decorator_name(&self, decorator: &ruff_python_ast::Decorator) -> Option<String> {
+        match &decorator.expression {
+            // Handle simple decorators like @my_decorator
+            Expr::Name(_) | Expr::Attribute(_) => self.get_function_name(&decorator.expression),
+            // Handle decorator calls like @functools.lru_cache(maxsize=128)
+            Expr::Call(call_expr) => {
+                if let Some(func_name) = self.get_function_name(&call_expr.func) {
+                    Some(format!("{}(...)", func_name))
+                } else {
+                    None
                 }
             }
             _ => None,
