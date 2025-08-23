@@ -12,6 +12,8 @@ pub struct CallGraphBuilder {
     pub current_file: String,
     pub current_file_path: PathBuf,
     pub imports: HashMap<String, String>, // alias -> full_module_path
+    pub current_function_defaults: HashMap<String, String>, // param_name -> default_value
+    pub current_function_component_gets: Vec<String>, // component gets for current function
 }
 
 impl CallGraphBuilder {
@@ -22,6 +24,8 @@ impl CallGraphBuilder {
             current_file: String::new(),
             current_file_path: PathBuf::new(),
             imports: HashMap::new(),
+            current_function_defaults: HashMap::new(),
+            current_function_component_gets: Vec::new(),
         }
     }
 
@@ -55,7 +59,7 @@ impl CallGraphBuilder {
                 partials: Vec::new(),
                 imports: Vec::new(),
                 aliases: std::collections::HashMap::new(),
-                component_gets: Vec::new(),
+                constants: std::collections::HashMap::new(),
             };
             self.modules.insert(module_name.to_string(), module_info);
         }
@@ -76,7 +80,7 @@ impl CallGraphBuilder {
                 partials: Vec::new(),
                 imports: vec![import.to_string()],
                 aliases: std::collections::HashMap::new(),
-                component_gets: Vec::new(),
+                constants: std::collections::HashMap::new(),
             };
             self.modules.insert(module_name.to_string(), module_info);
         }
@@ -97,7 +101,7 @@ impl CallGraphBuilder {
                 partials: vec![partial.to_string()],
                 imports: Vec::new(),
                 aliases: std::collections::HashMap::new(),
-                component_gets: Vec::new(),
+                constants: std::collections::HashMap::new(),
             };
             self.modules.insert(module_name.to_string(), module_info);
         }
@@ -120,23 +124,27 @@ impl CallGraphBuilder {
                 partials: Vec::new(),
                 imports: Vec::new(),
                 aliases,
-                component_gets: Vec::new(),
+                constants: std::collections::HashMap::new(),
             };
             self.modules.insert(module_name.to_string(), module_info);
         }
     }
 
-    pub fn add_component_get_to_module(&mut self, module_name: &str, component_get: &str) {
+    pub fn add_constant_to_module(
+        &mut self,
+        module_name: &str,
+        constant_name: &str,
+        constant_value: &str,
+    ) {
         if let Some(module_info) = self.modules.get_mut(module_name) {
-            // Module exists, add component_get if not already present
-            if !module_info
-                .component_gets
-                .contains(&component_get.to_string())
-            {
-                module_info.component_gets.push(component_get.to_string());
-            }
+            // Module exists, add constant
+            module_info
+                .constants
+                .insert(constant_name.to_string(), constant_value.to_string());
         } else {
-            // Create new module with this component_get
+            // Create new module with this constant
+            let mut constants = std::collections::HashMap::new();
+            constants.insert(constant_name.to_string(), constant_value.to_string());
             let module_info = ModuleInfo {
                 name: module_name.to_string(),
                 path: self.current_file.clone(),
@@ -144,7 +152,7 @@ impl CallGraphBuilder {
                 partials: Vec::new(),
                 imports: Vec::new(),
                 aliases: std::collections::HashMap::new(),
-                component_gets: vec![component_get.to_string()],
+                constants,
             };
             self.modules.insert(module_name.to_string(), module_info);
         }
@@ -403,14 +411,27 @@ impl CallGraphBuilder {
                 // Examples: my_func = functools.partial(some_function, arg1)
                 //           my_func = partial(some_function, arg1)
                 self.detect_partial_assignments(assign_stmt, lib_root);
+
+                // Check for module-level constants
+                // Examples: gc = "grating_coupler_elliptical"
+                self.detect_constant_assignments(assign_stmt, lib_root);
             }
             Stmt::FunctionDef(func_def) => {
                 let func_name = func_def.name.to_string();
                 let mut calls = Vec::new();
 
+                // Extract parameter defaults first
+                let parameter_defaults = self.extract_parameter_defaults(&func_def.parameters);
+
+                // Set current function defaults for argument resolution
+                self.current_function_defaults = parameter_defaults.clone();
+
+                // Clear component gets for this function
+                self.current_function_component_gets.clear();
+
                 for body_stmt in &func_def.body {
                     self.extract_calls_from_stmt(body_stmt, &mut calls);
-                    // Also extract component_gets for this module
+                    // Also extract component_gets for this function
                     self.extract_component_gets_from_stmt(body_stmt, lib_root);
                 }
 
@@ -433,6 +454,8 @@ impl CallGraphBuilder {
                     decorators,
                     resolved_calls,
                     resolved_decorators: Vec::new(),
+                    parameter_defaults,
+                    component_gets: self.current_function_component_gets.clone(),
                 };
 
                 // Add function to module's function list
@@ -446,9 +469,19 @@ impl CallGraphBuilder {
                         let full_method_name = format!("{}.{}", class_def.name, method_def.name);
                         let mut calls = Vec::new();
 
+                        // Extract parameter defaults for methods first
+                        let parameter_defaults =
+                            self.extract_parameter_defaults(&method_def.parameters);
+
+                        // Set current function defaults for argument resolution
+                        self.current_function_defaults = parameter_defaults.clone();
+
+                        // Clear component gets for this method
+                        self.current_function_component_gets.clear();
+
                         for body_stmt in &method_def.body {
                             self.extract_calls_from_stmt(body_stmt, &mut calls);
-                            // Also extract component_gets for this module
+                            // Also extract component_gets for this method
                             self.extract_component_gets_from_stmt(body_stmt, lib_root);
                         }
 
@@ -471,6 +504,8 @@ impl CallGraphBuilder {
                             decorators,
                             resolved_calls,
                             resolved_decorators: Vec::new(),
+                            parameter_defaults,
+                            component_gets: self.current_function_component_gets.clone(),
                         };
 
                         // Add function to module's function list
@@ -862,19 +897,14 @@ impl CallGraphBuilder {
                     if func_name == "gf.get_component" || func_name == "get_component" {
                         // Extract the first argument (component name)
                         if let Some(first_arg) = call_expr.arguments.args.first() {
-                            let component_name =
-                                if let Some(string_literal) = self.get_string_literal(first_arg) {
-                                    format!("\"{}\"", string_literal)
-                                } else if let Some(var_name) = self.get_variable_name(first_arg) {
-                                    var_name
-                                } else {
-                                    "unknown".to_string()
-                                };
-
                             let current_module =
                                 self.derive_module(&self.current_file_path, lib_root);
-                            let component_get_info = format!("get_component({})", component_name);
-                            self.add_component_get_to_module(&current_module, &component_get_info);
+                            let resolved_component_name =
+                                self.resolve_component_argument(first_arg, &current_module);
+                            let component_get_info =
+                                format!("get_component({})", resolved_component_name);
+                            self.current_function_component_gets
+                                .push(component_get_info);
                         }
                     }
                 }
@@ -925,6 +955,105 @@ impl CallGraphBuilder {
             }
             _ => None,
         }
+    }
+
+    fn detect_constant_assignments(
+        &mut self,
+        assign_stmt: &ruff_python_ast::StmtAssign,
+        lib_root: &Path,
+    ) {
+        // Check if this is a simple assignment to a string literal
+        if let Some(string_value) = self.get_string_literal(&assign_stmt.value) {
+            // Extract the variable names being assigned to
+            for target in &assign_stmt.targets {
+                if let Some(var_names) = self.extract_assignment_targets(target) {
+                    let current_module = self.derive_module(&self.current_file_path, lib_root);
+                    for var_name in var_names {
+                        self.add_constant_to_module(&current_module, &var_name, &string_value);
+                    }
+                }
+            }
+        }
+    }
+
+    fn extract_parameter_defaults(
+        &self,
+        parameters: &ruff_python_ast::Parameters,
+    ) -> std::collections::HashMap<String, String> {
+        let mut defaults = std::collections::HashMap::new();
+
+        // Extract defaults from regular args with defaults
+        for arg in &parameters.args {
+            if let Some(default_expr) = &arg.default {
+                let param_name = arg.parameter.name.to_string();
+
+                // Try to extract the default value
+                if let Some(string_value) = self.get_string_literal(default_expr) {
+                    defaults.insert(param_name, format!("\"{}\"", string_value));
+                } else if let Some(var_name) = self.get_variable_name(default_expr) {
+                    defaults.insert(param_name, var_name);
+                }
+            }
+        }
+
+        // Extract defaults from keyword-only args
+        for arg in &parameters.kwonlyargs {
+            if let Some(default_expr) = &arg.default {
+                let param_name = arg.parameter.name.to_string();
+
+                // Try to extract the default value
+                if let Some(string_value) = self.get_string_literal(default_expr) {
+                    defaults.insert(param_name, format!("\"{}\"", string_value));
+                } else if let Some(var_name) = self.get_variable_name(default_expr) {
+                    defaults.insert(param_name, var_name);
+                }
+            }
+        }
+
+        defaults
+    }
+
+    fn resolve_component_argument(&self, arg_expr: &Expr, current_module: &str) -> String {
+        // First try direct resolution
+        if let Some(string_literal) = self.get_string_literal(arg_expr) {
+            return format!("\"{}\"", string_literal);
+        }
+
+        if let Some(var_name) = self.get_variable_name(arg_expr) {
+            // Try to resolve from current function parameter defaults
+            if let Some(default_value) = self.current_function_defaults.get(&var_name) {
+                return self.resolve_component_argument_recursively(default_value, current_module);
+            }
+
+            // Try to resolve from module constants
+            if let Some(module_info) = self.modules.get(current_module) {
+                if let Some(constant_value) = module_info.constants.get(&var_name) {
+                    return format!("\"{}\"", constant_value);
+                }
+            }
+
+            // Return the variable name if we can't resolve it
+            return var_name;
+        }
+
+        "unknown".to_string()
+    }
+
+    fn resolve_component_argument_recursively(&self, value: &str, current_module: &str) -> String {
+        // If it's already a string literal, return as-is
+        if value.starts_with('"') && value.ends_with('"') {
+            return value.to_string();
+        }
+
+        // Try to resolve as a module constant
+        if let Some(module_info) = self.modules.get(current_module) {
+            if let Some(constant_value) = module_info.constants.get(value) {
+                return format!("\"{}\"", constant_value);
+            }
+        }
+
+        // Return as variable name if we can't resolve further
+        value.to_string()
     }
 
     fn detect_partial_assignments(
