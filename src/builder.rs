@@ -697,10 +697,21 @@ impl CallGraphBuilder {
             let mut resolved_component_gets = Vec::new();
             for component_get in &func_info.component_gets {
                 if let Some(component_name) = Self::extract_component_name_from_get(component_get) {
+                    // First try to resolve as a YAML call (simple function name)
                     if let Some(resolved) =
                         Self::resolve_yaml_call(&component_name, &functions_clone, yaml_prefix)
                     {
                         resolved_component_gets.push(resolved);
+                    } else if component_name.contains('.') {
+                        // If it's a dotted name and YAML resolution failed, try function call resolution
+                        if let Some(resolved) = Self::resolve_call_with_imports(
+                            &component_name,
+                            &func_info.module,
+                            &functions_clone,
+                            &modules_clone,
+                        ) {
+                            resolved_component_gets.push(resolved);
+                        }
                     }
                 }
             }
