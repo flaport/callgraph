@@ -92,29 +92,54 @@ fn split_into_blocks(content: &str) -> Vec<(String, usize)> {
     let mut block_start_line = 1;
     let mut in_block = false;
     let mut block_indent = 0;
+    let mut in_decorator_sequence = false;
     
     for (line_idx, line) in lines.iter().enumerate() {
         let line_num = line_idx + 1;
         let trimmed = line.trim_start();
         let indent = line.len() - trimmed.len();
         
+        // Check for decorator
+        if trimmed.starts_with("@") {
+            if in_block {
+                // Finish previous block
+                if !current_block.trim().is_empty() {
+                    blocks.push((current_block.clone(), block_start_line));
+                }
+                current_block.clear();
+            }
+            // Start new decorator sequence
+            in_decorator_sequence = true;
+            in_block = true;
+            block_start_line = line_num;
+            block_indent = indent;
+            current_block.push_str(line);
+            current_block.push('\n');
+            continue;
+        }
+        
         // Check for start of new top-level block
         let is_new_block = trimmed.starts_with("def ") || 
                           trimmed.starts_with("class ") ||
                           trimmed.starts_with("import ") ||
-                          trimmed.starts_with("from ") ||
-                          (trimmed.starts_with("@") && !in_block);
-        
-        if is_new_block && in_block {
-            // Finish previous block
-            if !current_block.trim().is_empty() {
-                blocks.push((current_block.clone(), block_start_line));
-            }
-            current_block.clear();
-            block_start_line = line_num;
-        }
+                          trimmed.starts_with("from ");
         
         if is_new_block {
+            if in_decorator_sequence {
+                // This function/class belongs to the decorator sequence - continue current block
+                in_decorator_sequence = false;
+                current_block.push_str(line);
+                current_block.push('\n');
+                continue;
+            } else if in_block {
+                // Finish previous block
+                if !current_block.trim().is_empty() {
+                    blocks.push((current_block.clone(), block_start_line));
+                }
+                current_block.clear();
+                block_start_line = line_num;
+            }
+            
             in_block = true;
             block_indent = indent;
             current_block.push_str(line);
@@ -131,6 +156,7 @@ fn split_into_blocks(content: &str) -> Vec<(String, usize)> {
                 }
                 current_block.clear();
                 in_block = false;
+                in_decorator_sequence = false;
                 
                 // Start new block if this line starts one
                 if trimmed.starts_with("def ") || trimmed.starts_with("class ") ||
