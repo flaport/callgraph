@@ -68,7 +68,7 @@ impl CallGraphBuilder {
                 imports: Vec::new(),
                 aliases: std::collections::HashMap::new(),
                 constants: std::collections::HashMap::new(),
-                error: String::new(),
+                errors: Vec::new(),
             };
             self.modules.insert(module_name.to_string(), module_info);
         }
@@ -90,7 +90,7 @@ impl CallGraphBuilder {
                 imports: vec![import.to_string()],
                 aliases: std::collections::HashMap::new(),
                 constants: std::collections::HashMap::new(),
-                error: String::new(),
+                errors: Vec::new(),
             };
             self.modules.insert(module_name.to_string(), module_info);
         }
@@ -112,7 +112,7 @@ impl CallGraphBuilder {
                 imports: Vec::new(),
                 aliases: std::collections::HashMap::new(),
                 constants: std::collections::HashMap::new(),
-                error: String::new(),
+                errors: Vec::new(),
             };
             self.modules.insert(module_name.to_string(), module_info);
         }
@@ -136,7 +136,7 @@ impl CallGraphBuilder {
                 imports: Vec::new(),
                 aliases,
                 constants: std::collections::HashMap::new(),
-                error: String::new(),
+                errors: Vec::new(),
             };
             self.modules.insert(module_name.to_string(), module_info);
         }
@@ -165,7 +165,7 @@ impl CallGraphBuilder {
                 imports: Vec::new(),
                 aliases: std::collections::HashMap::new(),
                 constants,
-                error: String::new(),
+                errors: Vec::new(),
             };
             self.modules.insert(module_name.to_string(), module_info);
         }
@@ -174,7 +174,7 @@ impl CallGraphBuilder {
     pub fn add_error_to_module(&mut self, module_name: &str, error: &str) {
         if let Some(module_info) = self.modules.get_mut(module_name) {
             // Module exists, set error
-            module_info.error = error.to_string();
+            module_info.errors.push(error.to_string());
         } else {
             // Create new module with error
             let module_info = ModuleInfo {
@@ -185,7 +185,7 @@ impl CallGraphBuilder {
                 imports: Vec::new(),
                 aliases: std::collections::HashMap::new(),
                 constants: std::collections::HashMap::new(),
-                error: error.to_string(),
+                errors: vec![error.to_string()],
             };
             self.modules.insert(module_name.to_string(), module_info);
         }
