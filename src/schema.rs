@@ -30,4 +30,5 @@ pub struct ModuleInfo {
     pub imports: Vec<String>,
     pub aliases: std::collections::HashMap<String, String>,
     pub constants: std::collections::HashMap<String, String>,
+    pub error: String,
 }

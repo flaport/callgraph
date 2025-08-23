@@ -72,7 +72,7 @@ fn main() -> anyhow::Result<()> {
         for file_path in files {
             if let Err(e) = builder.analyze_file(&file_path, &path) {
                 debug!("Failed to analyze {}: {}", file_path.display(), e);
-                continue;
+                // Continue processing - error is now captured in module
             }
         }
     }

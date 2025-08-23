@@ -35,13 +35,21 @@ impl CallGraphBuilder {
 
         let file_name = file_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
 
-        if file_name.ends_with(".pic.yml") {
+        let result = if file_name.ends_with(".pic.yml") {
             analyze_yaml_file(self, file_path, lib_root)
         } else if file_path.extension().map_or(false, |ext| ext == "py") {
             analyze_python_file(self, file_path, lib_root)
         } else {
             Ok(())
+        };
+
+        // If there was an error, add it to the module
+        if let Err(ref error) = result {
+            let module_name = self.derive_module(file_path, lib_root);
+            self.add_error_to_module(&module_name, &error.to_string());
         }
+
+        result
     }
 
     pub fn add_function_to_module(&mut self, module_name: &str, function_name: &str) {
@@ -60,6 +68,7 @@ impl CallGraphBuilder {
                 imports: Vec::new(),
                 aliases: std::collections::HashMap::new(),
                 constants: std::collections::HashMap::new(),
+                error: String::new(),
             };
             self.modules.insert(module_name.to_string(), module_info);
         }
@@ -81,6 +90,7 @@ impl CallGraphBuilder {
                 imports: vec![import.to_string()],
                 aliases: std::collections::HashMap::new(),
                 constants: std::collections::HashMap::new(),
+                error: String::new(),
             };
             self.modules.insert(module_name.to_string(), module_info);
         }
@@ -102,6 +112,7 @@ impl CallGraphBuilder {
                 imports: Vec::new(),
                 aliases: std::collections::HashMap::new(),
                 constants: std::collections::HashMap::new(),
+                error: String::new(),
             };
             self.modules.insert(module_name.to_string(), module_info);
         }
@@ -125,6 +136,7 @@ impl CallGraphBuilder {
                 imports: Vec::new(),
                 aliases,
                 constants: std::collections::HashMap::new(),
+                error: String::new(),
             };
             self.modules.insert(module_name.to_string(), module_info);
         }
@@ -153,6 +165,27 @@ impl CallGraphBuilder {
                 imports: Vec::new(),
                 aliases: std::collections::HashMap::new(),
                 constants,
+                error: String::new(),
+            };
+            self.modules.insert(module_name.to_string(), module_info);
+        }
+    }
+
+    pub fn add_error_to_module(&mut self, module_name: &str, error: &str) {
+        if let Some(module_info) = self.modules.get_mut(module_name) {
+            // Module exists, set error
+            module_info.error = error.to_string();
+        } else {
+            // Create new module with error
+            let module_info = ModuleInfo {
+                name: module_name.to_string(),
+                path: self.current_file.clone(),
+                functions: Vec::new(),
+                partials: Vec::new(),
+                imports: Vec::new(),
+                aliases: std::collections::HashMap::new(),
+                constants: std::collections::HashMap::new(),
+                error: error.to_string(),
             };
             self.modules.insert(module_name.to_string(), module_info);
         }
