@@ -573,13 +573,22 @@ impl CallGraphBuilder {
             let mut resolved_calls = Vec::new();
 
             for call in &func_info.calls {
-                if let Some(resolved) = Self::resolve_call_with_imports(
-                    call,
-                    &func_info.module,
-                    &functions_clone,
-                    &modules_clone,
-                ) {
-                    resolved_calls.push(resolved);
+                // Check if this is a YAML function (has "yaml" decorator)
+                if func_info.decorators.contains(&"yaml".to_string()) {
+                    // For YAML functions, use simple name matching
+                    if let Some(resolved) = Self::resolve_yaml_call(call, &functions_clone) {
+                        resolved_calls.push(resolved);
+                    }
+                } else {
+                    // For Python functions, use import-aware resolution
+                    if let Some(resolved) = Self::resolve_call_with_imports(
+                        call,
+                        &func_info.module,
+                        &functions_clone,
+                        &modules_clone,
+                    ) {
+                        resolved_calls.push(resolved);
+                    }
                 }
             }
 
@@ -680,6 +689,35 @@ impl CallGraphBuilder {
                         all_modules,
                     ) {
                         return Some(resolved);
+                    }
+                }
+            }
+        }
+
+        None
+    }
+
+    fn resolve_yaml_call(
+        call_name: &str,
+        all_functions: &HashMap<String, FunctionInfo>,
+    ) -> Option<String> {
+        // For YAML calls, do simple name matching against all available functions
+        // This handles cases like "mzi3" -> "mycspdk.mzi3.mzi3" or "mzi" -> "cspdk.si220.cband.cells.mzis.mzi"
+
+        // First, try exact function name match
+        for (_, func_info) in all_functions {
+            if func_info.name == call_name {
+                return Some(format!("{}.{}", func_info.module, func_info.name));
+            }
+        }
+
+        // If no exact match found, try matching the last part of compound function names
+        // This handles cases where YAML calls "mzi" but the function is named "cells.mzi"
+        for (_, func_info) in all_functions {
+            if func_info.name.contains('.') {
+                if let Some(last_part) = func_info.name.split('.').last() {
+                    if last_part == call_name {
+                        return Some(format!("{}.{}", func_info.module, func_info.name));
                     }
                 }
             }
