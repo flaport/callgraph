@@ -36,17 +36,9 @@ fn main() -> anyhow::Result<()> {
     let mut paths = vec![];
     for path in &args.paths {
         if !path.exists() {
-            eprintln!(
-                "Warning: Dependency path does not exist: {}",
-                path.display()
-            );
             continue;
         }
         if !path.is_dir() {
-            eprintln!(
-                "Warning: Dependency path is not a directory: {}",
-                path.display()
-            );
             continue;
         }
         paths.push(path.clone());
@@ -67,16 +59,12 @@ fn main() -> anyhow::Result<()> {
             .with_context(|| format!("Failed to find analyzable files in {}", path.display()))?;
 
         if files.is_empty() {
-            eprintln!(
-                "Warning: No Python or YAML files found in {}",
-                path.display()
-            );
             continue;
         }
 
         for file_path in files {
-            if let Err(e) = builder.analyze_file(&file_path, &path) {
-                eprintln!("Warning: Failed to analyze {}: {}", file_path.display(), e);
+            if let Err(_e) = builder.analyze_file(&file_path, &path) {
+                // Silently skip files that can't be analyzed
                 continue;
             }
         }
@@ -119,7 +107,7 @@ fn main() -> anyhow::Result<()> {
     // Apply selection filter if specified
     let output_value = if let Some(select_path) = &args.select {
         extract_json_path(&json_value, select_path).unwrap_or_else(|| {
-            eprintln!("Warning: Path '{}' not found in output", select_path);
+            // Silently return null if path not found
             serde_json::Value::Null
         })
     } else {
