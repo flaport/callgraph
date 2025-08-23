@@ -19,6 +19,10 @@ struct Args {
     /// Show only the specified function (optional)
     #[arg(short, long)]
     function: Option<String>,
+
+    /// Select a specific nested key from the output using dot notation (e.g., "functions.mzi3.resolved_calls")
+    #[arg(short, long)]
+    select: Option<String>,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -95,10 +99,50 @@ fn main() -> anyhow::Result<()> {
         }
     }
 
-    let json_output = serde_json::to_string_pretty(&callgraph)
-        .context("Failed to serialize call graph to JSON")?;
+    // Serialize to JSON value for potential filtering
+    let json_value =
+        serde_json::to_value(&callgraph).context("Failed to serialize call graph to JSON value")?;
+
+    // Apply selection filter if specified
+    let output_value = if let Some(select_path) = &args.select {
+        extract_json_path(&json_value, select_path).unwrap_or_else(|| {
+            eprintln!("Warning: Path '{}' not found in output", select_path);
+            serde_json::Value::Null
+        })
+    } else {
+        json_value
+    };
+
+    let json_output = serde_json::to_string_pretty(&output_value)
+        .context("Failed to serialize output to JSON")?;
 
     println!("{}", json_output);
 
     Ok(())
+}
+
+/// Extract a value from a JSON object using dot-separated path notation
+/// Examples: "functions", "functions.mzi3", "functions.mzi3.resolved_calls"
+fn extract_json_path(json: &serde_json::Value, path: &str) -> Option<serde_json::Value> {
+    let parts: Vec<&str> = path.split('.').collect();
+    let mut current = json;
+
+    for part in parts {
+        match current {
+            serde_json::Value::Object(map) => {
+                current = map.get(part)?;
+            }
+            serde_json::Value::Array(arr) => {
+                // Try to parse part as array index
+                if let Ok(index) = part.parse::<usize>() {
+                    current = arr.get(index)?;
+                } else {
+                    return None;
+                }
+            }
+            _ => return None,
+        }
+    }
+
+    Some(current.clone())
 }
