@@ -2,9 +2,9 @@ use ruff_python_ast::{Expr, Stmt};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use crate::py::analyze_python_file;
+use crate::py::{FileAnalyzer, PythonAnalyzer};
 use crate::schema::{CallGraph, FunctionInfo, ModuleInfo};
-use crate::yaml::analyze_yaml_file;
+use crate::yaml::YamlAnalyzer;
 
 pub struct CallGraphBuilder {
     pub functions: Vec<FunctionInfo>,
@@ -36,9 +36,9 @@ impl CallGraphBuilder {
         let file_name = file_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
 
         let result = if file_name.ends_with(".pic.yml") {
-            analyze_yaml_file(self, file_path, lib_root)
+            YamlAnalyzer::analyze_file(self, file_path, lib_root)
         } else if file_path.extension().map_or(false, |ext| ext == "py") {
-            analyze_python_file(self, file_path, lib_root)
+            PythonAnalyzer::analyze_file(self, file_path, lib_root)
         } else {
             Ok(())
         };
