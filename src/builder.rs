@@ -55,6 +55,7 @@ impl CallGraphBuilder {
                 partials: Vec::new(),
                 imports: Vec::new(),
                 aliases: std::collections::HashMap::new(),
+                component_gets: Vec::new(),
             };
             self.modules.insert(module_name.to_string(), module_info);
         }
@@ -75,6 +76,7 @@ impl CallGraphBuilder {
                 partials: Vec::new(),
                 imports: vec![import.to_string()],
                 aliases: std::collections::HashMap::new(),
+                component_gets: Vec::new(),
             };
             self.modules.insert(module_name.to_string(), module_info);
         }
@@ -95,6 +97,7 @@ impl CallGraphBuilder {
                 partials: vec![partial.to_string()],
                 imports: Vec::new(),
                 aliases: std::collections::HashMap::new(),
+                component_gets: Vec::new(),
             };
             self.modules.insert(module_name.to_string(), module_info);
         }
@@ -117,6 +120,31 @@ impl CallGraphBuilder {
                 partials: Vec::new(),
                 imports: Vec::new(),
                 aliases,
+                component_gets: Vec::new(),
+            };
+            self.modules.insert(module_name.to_string(), module_info);
+        }
+    }
+
+    pub fn add_component_get_to_module(&mut self, module_name: &str, component_get: &str) {
+        if let Some(module_info) = self.modules.get_mut(module_name) {
+            // Module exists, add component_get if not already present
+            if !module_info
+                .component_gets
+                .contains(&component_get.to_string())
+            {
+                module_info.component_gets.push(component_get.to_string());
+            }
+        } else {
+            // Create new module with this component_get
+            let module_info = ModuleInfo {
+                name: module_name.to_string(),
+                path: self.current_file.clone(),
+                functions: Vec::new(),
+                partials: Vec::new(),
+                imports: Vec::new(),
+                aliases: std::collections::HashMap::new(),
+                component_gets: vec![component_get.to_string()],
             };
             self.modules.insert(module_name.to_string(), module_info);
         }
@@ -382,6 +410,8 @@ impl CallGraphBuilder {
 
                 for body_stmt in &func_def.body {
                     self.extract_calls_from_stmt(body_stmt, &mut calls);
+                    // Also extract component_gets for this module
+                    self.extract_component_gets_from_stmt(body_stmt, lib_root);
                 }
 
                 // Extract decorator names
@@ -418,6 +448,8 @@ impl CallGraphBuilder {
 
                         for body_stmt in &method_def.body {
                             self.extract_calls_from_stmt(body_stmt, &mut calls);
+                            // Also extract component_gets for this module
+                            self.extract_component_gets_from_stmt(body_stmt, lib_root);
                         }
 
                         // Extract decorator names for methods
@@ -786,6 +818,113 @@ impl CallGraphBuilder {
         }
 
         None
+    }
+
+    fn extract_component_gets_from_stmt(&mut self, stmt: &Stmt, lib_root: &Path) {
+        match stmt {
+            Stmt::Expr(expr_stmt) => {
+                self.extract_component_gets_from_expr(&expr_stmt.value, lib_root);
+            }
+            Stmt::Assign(assign_stmt) => {
+                self.extract_component_gets_from_expr(&assign_stmt.value, lib_root);
+            }
+            Stmt::Return(return_stmt) => {
+                if let Some(value) = &return_stmt.value {
+                    self.extract_component_gets_from_expr(value, lib_root);
+                }
+            }
+            Stmt::If(if_stmt) => {
+                self.extract_component_gets_from_expr(&if_stmt.test, lib_root);
+                for s in &if_stmt.body {
+                    self.extract_component_gets_from_stmt(s, lib_root);
+                }
+                for s in &if_stmt.elif_else_clauses {
+                    for stmt in &s.body {
+                        self.extract_component_gets_from_stmt(stmt, lib_root);
+                    }
+                }
+            }
+            Stmt::For(for_stmt) => {
+                self.extract_component_gets_from_expr(&for_stmt.iter, lib_root);
+                for s in &for_stmt.body {
+                    self.extract_component_gets_from_stmt(s, lib_root);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn extract_component_gets_from_expr(&mut self, expr: &Expr, lib_root: &Path) {
+        match expr {
+            Expr::Call(call_expr) => {
+                // Check if this is a get_component call
+                if let Some(func_name) = self.get_function_name(&call_expr.func) {
+                    if func_name == "gf.get_component" || func_name == "get_component" {
+                        // Extract the first argument (component name)
+                        if let Some(first_arg) = call_expr.arguments.args.first() {
+                            let component_name =
+                                if let Some(string_literal) = self.get_string_literal(first_arg) {
+                                    format!("\"{}\"", string_literal)
+                                } else if let Some(var_name) = self.get_variable_name(first_arg) {
+                                    var_name
+                                } else {
+                                    "unknown".to_string()
+                                };
+
+                            let current_module =
+                                self.derive_module(&self.current_file_path, lib_root);
+                            let component_get_info = format!("get_component({})", component_name);
+                            self.add_component_get_to_module(&current_module, &component_get_info);
+                        }
+                    }
+                }
+
+                // Recursively process the function being called
+                self.extract_component_gets_from_expr(&call_expr.func, lib_root);
+
+                // Process arguments
+                for arg in &call_expr.arguments.args {
+                    self.extract_component_gets_from_expr(arg, lib_root);
+                }
+            }
+            Expr::Attribute(attr_expr) => {
+                // Recursively process the value part of the attribute access
+                self.extract_component_gets_from_expr(&attr_expr.value, lib_root);
+            }
+            Expr::BinOp(binop_expr) => {
+                self.extract_component_gets_from_expr(&binop_expr.left, lib_root);
+                self.extract_component_gets_from_expr(&binop_expr.right, lib_root);
+            }
+            Expr::List(list_expr) => {
+                for elt in &list_expr.elts {
+                    self.extract_component_gets_from_expr(elt, lib_root);
+                }
+            }
+            Expr::Tuple(tuple_expr) => {
+                for elt in &tuple_expr.elts {
+                    self.extract_component_gets_from_expr(elt, lib_root);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn get_string_literal(&self, expr: &Expr) -> Option<String> {
+        match expr {
+            Expr::StringLiteral(string_expr) => Some(string_expr.value.to_string()),
+            _ => None,
+        }
+    }
+
+    fn get_variable_name(&self, expr: &Expr) -> Option<String> {
+        match expr {
+            Expr::Name(name_expr) => Some(name_expr.id.to_string()),
+            Expr::Attribute(_attr_expr) => {
+                // Handle dotted names like cells.pad
+                self.get_function_name(expr)
+            }
+            _ => None,
+        }
     }
 
     fn detect_partial_assignments(

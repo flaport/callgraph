@@ -26,4 +26,5 @@ pub struct ModuleInfo {
     pub partials: Vec<String>,
     pub imports: Vec<String>,
     pub aliases: std::collections::HashMap<String, String>,
+    pub component_gets: Vec<String>,
 }
