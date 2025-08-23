@@ -101,12 +101,17 @@ impl CallGraphBuilder {
         }
     }
 
-    pub fn resolve_relative_import_with_level(&self, module_name: &str, current_module: &str, level: u32) -> String {
+    pub fn resolve_relative_import_with_level(
+        &self,
+        module_name: &str,
+        current_module: &str,
+        level: u32,
+    ) -> String {
         // Handle relative imports using the level attribute
         // level 1 = single dot (.), level 2 = double dot (..), etc.
-        
+
         let current_parts: Vec<&str> = current_module.split('.').collect();
-        
+
         if level == 1 {
             // Single dot means import from current package
             // For __init__.py files, this means import from within the current package
@@ -115,15 +120,15 @@ impl CallGraphBuilder {
         } else if level > 1 {
             // Multiple dots mean go up directories
             let levels_up = (level - 1) as usize; // level 2 = go up 1 level, level 3 = go up 2 levels, etc.
-            
+
             if levels_up >= current_parts.len() {
                 // Can't go up more levels than we have
                 return format!("{}{}", ".".repeat(level as usize), module_name);
             }
-            
+
             let base_parts = &current_parts[..current_parts.len() - levels_up];
             let base_module = base_parts.join(".");
-            
+
             if base_module.is_empty() {
                 module_name.to_string()
             } else {
@@ -206,11 +211,15 @@ impl CallGraphBuilder {
             Stmt::ImportFrom(import_from_stmt) => {
                 if let Some(module) = &import_from_stmt.module {
                     let module_name = module.to_string();
-                    
+
                     // Use the level attribute to determine if this is a relative import
                     let absolute_module = if import_from_stmt.level > 0 {
                         // This is a relative import
-                        self.resolve_relative_import_with_level(&module_name, &current_module, import_from_stmt.level)
+                        self.resolve_relative_import_with_level(
+                            &module_name,
+                            &current_module,
+                            import_from_stmt.level,
+                        )
                     } else {
                         // This is an absolute import
                         module_name.clone()
@@ -260,7 +269,7 @@ impl CallGraphBuilder {
                             // Multiple dots: go up directories
                             let current_parts: Vec<&str> = current_module.split('.').collect();
                             let levels_up = (import_from_stmt.level - 1) as usize;
-                            
+
                             if levels_up >= current_parts.len() {
                                 imported_name.clone()
                             } else {
@@ -558,14 +567,18 @@ impl CallGraphBuilder {
 
     fn resolve_all_calls(&mut self) {
         let functions_clone = self.functions.clone();
+        let modules_clone = self.modules.clone();
 
         for (_, func_info) in self.functions.iter_mut() {
             let mut resolved_calls = Vec::new();
 
             for call in &func_info.calls {
-                if let Some(resolved) =
-                    Self::resolve_call_against_all_functions(call, &functions_clone)
-                {
+                if let Some(resolved) = Self::resolve_call_with_imports(
+                    call,
+                    &func_info.module,
+                    &functions_clone,
+                    &modules_clone,
+                ) {
                     resolved_calls.push(resolved);
                 }
             }
@@ -574,27 +587,100 @@ impl CallGraphBuilder {
         }
     }
 
-    fn resolve_call_against_all_functions(
+    fn resolve_call_with_imports(
         call_name: &str,
+        calling_module: &str,
         all_functions: &HashMap<String, FunctionInfo>,
+        all_modules: &HashMap<String, ModuleInfo>,
     ) -> Option<String> {
-        // Simple resolution: look for functions with matching names
-        // This is a simplified approach - in a full implementation, we'd need to track imports per file
+        // Get the module info for the calling module
+        let current_module_info = all_modules.get(calling_module)?;
 
-        // Direct match - look for exact function name
-        for (_, func_info) in all_functions {
-            if func_info.name == call_name {
-                return Some(format!("{}.{}", func_info.module, func_info.name));
+        if let Some(dot_pos) = call_name.find('.') {
+            // Handle dotted calls like "cells.mzi"
+            let imported_name = &call_name[..dot_pos];
+            let function_name = &call_name[dot_pos + 1..];
+
+            // Find the import that matches the imported_name
+            if let Some(target_module) =
+                Self::find_import_target(imported_name, current_module_info)
+            {
+                // Now resolve the function in the target module
+                return Self::resolve_function_in_module(
+                    function_name,
+                    &target_module,
+                    all_functions,
+                    all_modules,
+                );
+            }
+        } else {
+            // Handle direct function calls - look in current module first, then imports
+            // First check if it's defined in the current module
+            if current_module_info
+                .functions
+                .contains(&call_name.to_string())
+            {
+                return Some(format!("{}.{}", calling_module, call_name));
+            }
+
+            // Then check imports (this would handle cases like "from module import function")
+            for import in &current_module_info.imports {
+                if import.ends_with(&format!(".{}", call_name)) {
+                    // This import brings the function directly into scope
+                    return Some(import.clone());
+                }
             }
         }
 
-        // Handle dotted calls like "cells.mzi" - look for function "mzi"
-        if let Some(dot_pos) = call_name.find('.') {
-            let function_name = &call_name[dot_pos + 1..];
+        None
+    }
 
-            for (_, func_info) in all_functions {
-                if func_info.name == function_name {
-                    return Some(format!("{}.{}", func_info.module, func_info.name));
+    fn find_import_target(imported_name: &str, module_info: &ModuleInfo) -> Option<String> {
+        // Look through the imports to find what the imported_name refers to
+        for import in &module_info.imports {
+            // Check if this is a direct module import like "cspdk.si220.cband.cells"
+            if import.ends_with(&format!(".{}", imported_name)) || import == imported_name {
+                // The imported_name refers to this module
+                return Some(import.clone());
+            }
+            // Check if this is an aliased import (we'd need to track aliases separately)
+        }
+        None
+    }
+
+    fn resolve_function_in_module(
+        function_name: &str,
+        target_module: &str,
+        all_functions: &HashMap<String, FunctionInfo>,
+        all_modules: &HashMap<String, ModuleInfo>,
+    ) -> Option<String> {
+        // First, check if the function is directly defined in this module
+        if let Some(module_info) = all_modules.get(target_module) {
+            if module_info.functions.contains(&function_name.to_string()) {
+                return Some(format!("{}.{}", target_module, function_name));
+            }
+
+            // If not directly defined, check if it's imported
+            // Case 1: Explicit import like "cspdk.si220.cband.cells.mzis.mzi"
+            for import in &module_info.imports {
+                if import.ends_with(&format!(".{}", function_name)) {
+                    return Some(import.clone());
+                }
+            }
+
+            // Case 2: Star imports like "cspdk.si220.cband.cells.mzis.*"
+            for import in &module_info.imports {
+                if import.ends_with(".*") {
+                    let star_module = import.strip_suffix(".*").unwrap();
+                    // Recursively check the star-imported module
+                    if let Some(resolved) = Self::resolve_function_in_module(
+                        function_name,
+                        star_module,
+                        all_functions,
+                        all_modules,
+                    ) {
+                        return Some(resolved);
+                    }
                 }
             }
         }
