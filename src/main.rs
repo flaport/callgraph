@@ -20,7 +20,7 @@ struct Args {
     #[arg(short, long)]
     function: Option<String>,
 
-    /// Select a specific nested key from the output using dot notation (e.g., "functions.mzi3.resolved_calls")
+    /// Select a specific nested key from the output using colon notation (e.g., "functions:mzi3:resolved_calls")
     #[arg(short, long)]
     select: Option<String>,
 
@@ -134,10 +134,10 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Extract a value from a JSON object using dot-separated path notation
-/// Examples: "functions", "functions.mzi3", "functions.mzi3.resolved_calls"
+/// Extract a value from a JSON object using colon-separated path notation
+/// Examples: "functions", "functions:mzi3", "functions:mzi3:resolved_calls"
 fn extract_json_path(json: &serde_json::Value, path: &str) -> Option<serde_json::Value> {
-    let parts: Vec<&str> = path.split('.').collect();
+    let parts: Vec<&str> = path.split(':').collect();
     let mut current = json;
 
     for part in parts {
