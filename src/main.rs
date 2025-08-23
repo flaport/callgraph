@@ -1,5 +1,6 @@
 use anyhow::Context;
 use clap::Parser;
+use log::debug;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -30,15 +31,20 @@ struct Args {
 }
 
 fn main() -> anyhow::Result<()> {
+    // Initialize logger with INFO level by default, but respect RUST_LOG env var
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+
     let args = Args::parse();
 
     // Collect all paths to analyze (main path + dependencies)
     let mut paths = vec![];
     for path in &args.paths {
         if !path.exists() {
+            debug!("Dependency path does not exist: {}", path.display());
             continue;
         }
         if !path.is_dir() {
+            debug!("Dependency path is not a directory: {}", path.display());
             continue;
         }
         paths.push(path.clone());
@@ -59,12 +65,13 @@ fn main() -> anyhow::Result<()> {
             .with_context(|| format!("Failed to find analyzable files in {}", path.display()))?;
 
         if files.is_empty() {
+            debug!("No Python or YAML files found in {}", path.display());
             continue;
         }
 
         for file_path in files {
-            if let Err(_e) = builder.analyze_file(&file_path, &path) {
-                // Silently skip files that can't be analyzed
+            if let Err(e) = builder.analyze_file(&file_path, &path) {
+                debug!("Failed to analyze {}: {}", file_path.display(), e);
                 continue;
             }
         }
@@ -107,7 +114,7 @@ fn main() -> anyhow::Result<()> {
     // Apply selection filter if specified
     let output_value = if let Some(select_path) = &args.select {
         extract_json_path(&json_value, select_path).unwrap_or_else(|| {
-            // Silently return null if path not found
+            debug!("Path '{}' not found in output", select_path);
             serde_json::Value::Null
         })
     } else {
