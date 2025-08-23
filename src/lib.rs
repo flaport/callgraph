@@ -4,13 +4,19 @@ pub mod schema;
 pub mod walk;
 pub mod yaml;
 
+#[cfg(feature = "python")]
 use pyo3::prelude::*;
+#[cfg(feature = "python")]
 use pyo3::types::{PyDict, PyList};
+#[cfg(feature = "python")]
 use std::path::Path;
 
+#[cfg(feature = "python")]
 use crate::builder::CallGraphBuilder;
+#[cfg(feature = "python")]
 use crate::walk::find_analyzable_files;
 
+#[cfg(feature = "python")]
 /// Generate a call graph from the given library paths
 ///
 /// Args:
@@ -95,6 +101,7 @@ fn generate_call_graph(
     json_value_to_python(py, &json_value)
 }
 
+#[cfg(feature = "python")]
 /// Extract a nested value from JSON using a colon-separated path
 fn extract_json_path(value: &serde_json::Value, path: &str) -> serde_json::Value {
     let parts: Vec<&str> = path.split(':').collect();
@@ -116,6 +123,7 @@ fn extract_json_path(value: &serde_json::Value, path: &str) -> serde_json::Value
     current.clone()
 }
 
+#[cfg(feature = "python")]
 /// Convert serde_json::Value to Python object
 fn json_value_to_python(py: Python, value: &serde_json::Value) -> PyResult<PyObject> {
     match value {
@@ -148,6 +156,7 @@ fn json_value_to_python(py: Python, value: &serde_json::Value) -> PyResult<PyObj
     }
 }
 
+#[cfg(feature = "python")]
 /// Python module definition
 #[pymodule]
 fn callgraph(m: &Bound<'_, PyModule>) -> PyResult<()> {
