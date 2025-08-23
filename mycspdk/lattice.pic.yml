@@ -6,18 +6,18 @@ instances:
     component: mzi
     settings:
       delta_length: 100
-      splitter: mmi2x2 
+      splitter: mmi2x2
 connections: {}
 routes:
   bundle:
     links:
-      mzi2,o1: mzi1,o3 
-    routing_strategy: route_bundle 
-    settings: {} 
-nets: []
+      mzi2,o1: mzi1,o3
+    routing_strategy: route_bundle
+    settings: {}
+nets: [{]
 ports:
   o3: mzi2,o3
-  o1: mzi1,o1 
+  o1: mzi1,o1
   o2: mzi2,o4
 placements:
   mzi1:
