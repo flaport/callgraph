@@ -36,7 +36,7 @@ pub fn analyze_yaml_file(
         }
     }
 
-    // YAML files don't have decorators or resolvable calls (no imports)
+    // YAML files don't have decorators, imports, or partials
     let module_name = derive_yaml_module(file_path, lib_root);
     let func_info = FunctionInfo {
         name: func_name.to_string(),

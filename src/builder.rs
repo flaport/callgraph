@@ -52,6 +52,7 @@ impl CallGraphBuilder {
                 name: module_name.to_string(),
                 path: self.current_file.clone(),
                 functions: vec![function_name.to_string()],
+                partials: Vec::new(),
                 imports: Vec::new(),
             };
             self.modules.insert(module_name.to_string(), module_info);
@@ -70,7 +71,27 @@ impl CallGraphBuilder {
                 name: module_name.to_string(),
                 path: self.current_file.clone(),
                 functions: Vec::new(),
+                partials: Vec::new(),
                 imports: vec![import.to_string()],
+            };
+            self.modules.insert(module_name.to_string(), module_info);
+        }
+    }
+
+    pub fn add_partial_to_module(&mut self, module_name: &str, partial: &str) {
+        if let Some(module_info) = self.modules.get_mut(module_name) {
+            // Module exists, add partial if not already present
+            if !module_info.partials.contains(&partial.to_string()) {
+                module_info.partials.push(partial.to_string());
+            }
+        } else {
+            // Create new module with this partial
+            let module_info = ModuleInfo {
+                name: module_name.to_string(),
+                path: self.current_file.clone(),
+                functions: Vec::new(),
+                partials: vec![partial.to_string()],
+                imports: Vec::new(),
             };
             self.modules.insert(module_name.to_string(), module_info);
         }
@@ -303,6 +324,12 @@ impl CallGraphBuilder {
                     // Absolute import with no module (shouldn't happen in normal Python, but handle it)
                     // This case is rare and might indicate malformed import statements
                 }
+            }
+            Stmt::Assign(assign_stmt) => {
+                // Check for functools.partial assignments
+                // Examples: my_func = functools.partial(some_function, arg1)
+                //           my_func = partial(some_function, arg1)
+                self.detect_partial_assignments(assign_stmt, lib_root);
             }
             Stmt::FunctionDef(func_def) => {
                 let func_name = func_def.name.to_string();
@@ -667,5 +694,66 @@ impl CallGraphBuilder {
         }
 
         None
+    }
+
+    fn detect_partial_assignments(
+        &mut self,
+        assign_stmt: &ruff_python_ast::StmtAssign,
+        lib_root: &Path,
+    ) {
+        // Check if the assignment value is a call to functools.partial or partial
+        if let Expr::Call(call_expr) = assign_stmt.value.as_ref() {
+            if let Some(func_name) = self.get_function_name(&call_expr.func) {
+                // Check if it's a partial call
+                if func_name == "functools.partial" || func_name == "partial" {
+                    // Extract the variable names being assigned to
+                    for target in &assign_stmt.targets {
+                        if let Some(var_names) = self.extract_assignment_targets(target) {
+                            let current_module =
+                                self.derive_module(&self.current_file_path, lib_root);
+                            for var_name in var_names {
+                                // Get the first argument of partial (the function being wrapped)
+                                if let Some(wrapped_func) = call_expr.arguments.args.first() {
+                                    if let Some(wrapped_func_name) =
+                                        self.get_function_name(wrapped_func)
+                                    {
+                                        let partial_info = format!(
+                                            "{} = partial({})",
+                                            var_name, wrapped_func_name
+                                        );
+                                        self.add_partial_to_module(&current_module, &partial_info);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn extract_assignment_targets(&self, target: &Expr) -> Option<Vec<String>> {
+        match target {
+            Expr::Name(name_expr) => Some(vec![name_expr.id.to_string()]),
+            Expr::Tuple(tuple_expr) => {
+                let mut names = Vec::new();
+                for elt in &tuple_expr.elts {
+                    if let Expr::Name(name_expr) = elt {
+                        names.push(name_expr.id.to_string());
+                    }
+                }
+                if names.is_empty() { None } else { Some(names) }
+            }
+            Expr::List(list_expr) => {
+                let mut names = Vec::new();
+                for elt in &list_expr.elts {
+                    if let Expr::Name(name_expr) = elt {
+                        names.push(name_expr.id.to_string());
+                    }
+                }
+                if names.is_empty() { None } else { Some(names) }
+            }
+            _ => None,
+        }
     }
 }
