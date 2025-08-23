@@ -45,6 +45,7 @@ pub fn analyze_yaml_file(
         calls,
         decorators: vec!["yaml".to_string()],
         resolved_calls: Vec::new(),
+        resolved_decorators: Vec::new(),
     };
 
     // Add function to module's function list

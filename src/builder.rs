@@ -54,6 +54,7 @@ impl CallGraphBuilder {
                 functions: vec![function_name.to_string()],
                 partials: Vec::new(),
                 imports: Vec::new(),
+                aliases: std::collections::HashMap::new(),
             };
             self.modules.insert(module_name.to_string(), module_info);
         }
@@ -73,6 +74,7 @@ impl CallGraphBuilder {
                 functions: Vec::new(),
                 partials: Vec::new(),
                 imports: vec![import.to_string()],
+                aliases: std::collections::HashMap::new(),
             };
             self.modules.insert(module_name.to_string(), module_info);
         }
@@ -92,6 +94,29 @@ impl CallGraphBuilder {
                 functions: Vec::new(),
                 partials: vec![partial.to_string()],
                 imports: Vec::new(),
+                aliases: std::collections::HashMap::new(),
+            };
+            self.modules.insert(module_name.to_string(), module_info);
+        }
+    }
+
+    pub fn add_alias_to_module(&mut self, module_name: &str, alias: &str, full_path: &str) {
+        if let Some(module_info) = self.modules.get_mut(module_name) {
+            // Module exists, add alias
+            module_info
+                .aliases
+                .insert(alias.to_string(), full_path.to_string());
+        } else {
+            // Create new module with this alias
+            let mut aliases = std::collections::HashMap::new();
+            aliases.insert(alias.to_string(), full_path.to_string());
+            let module_info = ModuleInfo {
+                name: module_name.to_string(),
+                path: self.current_file.clone(),
+                functions: Vec::new(),
+                partials: Vec::new(),
+                imports: Vec::new(),
+                aliases,
             };
             self.modules.insert(module_name.to_string(), module_info);
         }
@@ -223,10 +248,15 @@ impl CallGraphBuilder {
                         .unwrap_or_else(|| module_name.clone());
 
                     // Store in internal imports map for function resolution
-                    self.imports.insert(alias_name, module_name.clone());
+                    self.imports.insert(alias_name.clone(), module_name.clone());
 
                     // Add absolute import to the current module's imports list
                     self.add_import_to_module(&current_module, &module_name);
+
+                    // Add alias to module if it's different from the original name
+                    if alias_name != module_name {
+                        self.add_alias_to_module(&current_module, &alias_name, &module_name);
+                    }
                 }
             }
             Stmt::ImportFrom(import_from_stmt) => {
@@ -256,7 +286,12 @@ impl CallGraphBuilder {
 
                         // Store in internal imports map for function resolution
                         let full_path = format!("{}.{}", absolute_module, imported_name);
-                        self.imports.insert(alias_name, full_path.clone());
+                        self.imports.insert(alias_name.clone(), full_path.clone());
+
+                        // Add alias to module if it's different from the imported name
+                        if alias_name != imported_name {
+                            self.add_alias_to_module(&current_module, &alias_name, &full_path);
+                        }
 
                         // Add absolute import to the current module's imports list
                         if imported_name == "*" {
@@ -305,7 +340,17 @@ impl CallGraphBuilder {
                         };
 
                         // Store in internal imports map for function resolution
-                        self.imports.insert(alias_name, absolute_import.clone());
+                        self.imports
+                            .insert(alias_name.clone(), absolute_import.clone());
+
+                        // Add alias to module if it's different from the imported name
+                        if alias_name != imported_name {
+                            self.add_alias_to_module(
+                                &current_module,
+                                &alias_name,
+                                &absolute_import,
+                            );
+                        }
 
                         // Add absolute import to the current module's imports list
                         if imported_name == "*" {
@@ -357,6 +402,7 @@ impl CallGraphBuilder {
                     calls,
                     decorators,
                     resolved_calls,
+                    resolved_decorators: Vec::new(),
                 };
 
                 // Add function to module's function list
@@ -392,6 +438,7 @@ impl CallGraphBuilder {
                             calls,
                             decorators,
                             resolved_calls,
+                            resolved_decorators: Vec::new(),
                         };
 
                         // Add function to module's function list
@@ -526,7 +573,9 @@ impl CallGraphBuilder {
 
         for func_info in self.functions.iter_mut() {
             let mut resolved_calls = Vec::new();
+            let mut resolved_decorators = Vec::new();
 
+            // Resolve calls
             for call in &func_info.calls {
                 // Check if this is a YAML function (has "yaml" decorator)
                 if func_info.decorators.contains(&"yaml".to_string()) {
@@ -549,7 +598,34 @@ impl CallGraphBuilder {
                 }
             }
 
+            // Resolve decorators (only for Python functions, not YAML)
+            if !func_info.decorators.contains(&"yaml".to_string()) {
+                for decorator in &func_info.decorators {
+                    // Remove the (...) suffix from decorator calls for resolution
+                    let decorator_name = if decorator.ends_with("(...)") {
+                        decorator.strip_suffix("(...)").unwrap_or(decorator)
+                    } else {
+                        decorator
+                    };
+
+                    if let Some(resolved) = Self::resolve_call_with_imports(
+                        decorator_name,
+                        &func_info.module,
+                        &functions_clone,
+                        &modules_clone,
+                    ) {
+                        // Restore the (...) suffix if it was there
+                        if decorator.ends_with("(...)") {
+                            resolved_decorators.push(format!("{}(...)", resolved));
+                        } else {
+                            resolved_decorators.push(resolved);
+                        }
+                    }
+                }
+            }
+
             func_info.resolved_calls = resolved_calls;
+            func_info.resolved_decorators = resolved_decorators;
         }
     }
 
@@ -563,11 +639,27 @@ impl CallGraphBuilder {
         let current_module_info = all_modules.get(calling_module)?;
 
         if let Some(dot_pos) = call_name.find('.') {
-            // Handle dotted calls like "cells.mzi"
+            // Handle dotted calls like "cells.mzi" or "gf.cell"
             let imported_name = &call_name[..dot_pos];
             let function_name = &call_name[dot_pos + 1..];
 
-            // Find the import that matches the imported_name
+            // First check if this is an alias in the module's aliases
+            if let Some(resolved_module) = current_module_info.aliases.get(imported_name) {
+                // This is an aliased import, use the resolved module path
+                if let Some(resolved) = Self::resolve_function_in_module(
+                    function_name,
+                    resolved_module,
+                    all_functions,
+                    all_modules,
+                ) {
+                    return Some(resolved);
+                } else {
+                    // If we can't find the exact function, at least provide the resolved module path
+                    return Some(format!("{}.{}", resolved_module, function_name));
+                }
+            }
+
+            // Fall back to the original import resolution logic
             if let Some(target_module) =
                 Self::find_import_target(imported_name, current_module_info)
             {

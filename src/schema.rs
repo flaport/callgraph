@@ -15,6 +15,7 @@ pub struct FunctionInfo {
     pub calls: Vec<String>,
     pub decorators: Vec<String>,
     pub resolved_calls: Vec<String>,
+    pub resolved_decorators: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -24,4 +25,5 @@ pub struct ModuleInfo {
     pub functions: Vec<String>,
     pub partials: Vec<String>,
     pub imports: Vec<String>,
+    pub aliases: std::collections::HashMap<String, String>,
 }
