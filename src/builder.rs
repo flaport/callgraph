@@ -456,6 +456,7 @@ impl CallGraphBuilder {
                     resolved_decorators: Vec::new(),
                     parameter_defaults,
                     component_gets: self.current_function_component_gets.clone(),
+                    resolved_component_gets: Vec::new(),
                 };
 
                 // Add function to module's function list
@@ -506,6 +507,7 @@ impl CallGraphBuilder {
                             resolved_decorators: Vec::new(),
                             parameter_defaults,
                             component_gets: self.current_function_component_gets.clone(),
+                            resolved_component_gets: Vec::new(),
                         };
 
                         // Add function to module's function list
@@ -691,8 +693,21 @@ impl CallGraphBuilder {
                 }
             }
 
+            // Resolve component_gets (similar to YAML resolution)
+            let mut resolved_component_gets = Vec::new();
+            for component_get in &func_info.component_gets {
+                if let Some(component_name) = Self::extract_component_name_from_get(component_get) {
+                    if let Some(resolved) =
+                        Self::resolve_yaml_call(&component_name, &functions_clone, yaml_prefix)
+                    {
+                        resolved_component_gets.push(resolved);
+                    }
+                }
+            }
+
             func_info.resolved_calls = resolved_calls;
             func_info.resolved_decorators = resolved_decorators;
+            func_info.resolved_component_gets = resolved_component_gets;
         }
     }
 
@@ -1054,6 +1069,33 @@ impl CallGraphBuilder {
 
         // Return as variable name if we can't resolve further
         value.to_string()
+    }
+
+    fn extract_component_name_from_get(component_get: &str) -> Option<String> {
+        // Parse strings like:
+        // "get_component(\"coupler\")" -> "coupler"
+        // "get_component(combiner)" -> "combiner"
+        // "get_component(cells.pad)" -> "cells.pad"
+
+        if let Some(start) = component_get.find("get_component(") {
+            let start_idx = start + "get_component(".len();
+            if let Some(end) = component_get.rfind(')') {
+                let arg = &component_get[start_idx..end];
+
+                // Remove surrounding quotes if present
+                let cleaned_arg = if (arg.starts_with('"') && arg.ends_with('"'))
+                    || (arg.starts_with('\'') && arg.ends_with('\''))
+                {
+                    &arg[1..arg.len() - 1]
+                } else {
+                    arg
+                };
+
+                return Some(cleaned_arg.to_string());
+            }
+        }
+
+        None
     }
 
     fn detect_partial_assignments(

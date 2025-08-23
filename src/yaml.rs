@@ -48,6 +48,7 @@ pub fn analyze_yaml_file(
         resolved_decorators: Vec::new(),
         parameter_defaults: std::collections::HashMap::new(),
         component_gets: Vec::new(),
+        resolved_component_gets: Vec::new(),
     };
 
     // Add function to module's function list

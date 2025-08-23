@@ -18,6 +18,7 @@ pub struct FunctionInfo {
     pub resolved_decorators: Vec<String>,
     pub parameter_defaults: std::collections::HashMap<String, String>,
     pub component_gets: Vec<String>,
+    pub resolved_component_gets: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
