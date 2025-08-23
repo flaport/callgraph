@@ -7,7 +7,7 @@ use crate::schema::{CallGraph, FunctionInfo, ModuleInfo};
 use crate::yaml::analyze_yaml_file;
 
 pub struct CallGraphBuilder {
-    pub functions: HashMap<String, FunctionInfo>,
+    pub functions: Vec<FunctionInfo>,
     pub modules: HashMap<String, ModuleInfo>,
     pub current_file: String,
     pub current_file_path: PathBuf,
@@ -17,7 +17,7 @@ pub struct CallGraphBuilder {
 impl CallGraphBuilder {
     pub fn new() -> Self {
         Self {
-            functions: HashMap::new(),
+            functions: Vec::new(),
             modules: HashMap::new(),
             current_file: String::new(),
             current_file_path: PathBuf::new(),
@@ -335,7 +335,7 @@ impl CallGraphBuilder {
                 // Add function to module's function list
                 self.add_function_to_module(&module_path, &func_name);
 
-                self.functions.insert(func_info.name.clone(), func_info);
+                self.functions.push(func_info);
             }
             Stmt::ClassDef(class_def) => {
                 for class_stmt in &class_def.body {
@@ -370,7 +370,7 @@ impl CallGraphBuilder {
                         // Add function to module's function list
                         self.add_function_to_module(&module_path, &full_method_name);
 
-                        self.functions.insert(func_info.name.clone(), func_info);
+                        self.functions.push(func_info);
                     }
                 }
             }
@@ -479,88 +479,16 @@ impl CallGraphBuilder {
         }
     }
 
-    fn resolve_call_to_definition(&self, call_name: &str) -> Option<String> {
-        // Check if the call starts with a known import
-        if let Some(dot_pos) = call_name.find('.') {
-            let prefix = &call_name[..dot_pos];
-            let function_name = &call_name[dot_pos + 1..];
-            if let Some(module_path) = self.imports.get(prefix) {
-                let expected_full_module = format!("{}.{}", module_path, function_name);
-
-                // Find the actual function definition in our analyzed functions
-                return self.find_function_definition(function_name, &expected_full_module);
-            }
-        }
-
-        // Check if the entire call name is an imported module/function
-        if let Some(module_path) = self.imports.get(call_name) {
-            return self.find_function_definition(call_name, module_path);
-        }
-
-        // No module resolution found
-        None
-    }
-
-    fn find_function_definition(
-        &self,
-        function_name: &str,
-        expected_module: &str,
-    ) -> Option<String> {
-        // Look for the function in our analyzed functions
-        // Return format: {module}.{func} where module is where the function is defined
-        for (_, func_info) in &self.functions {
-            if func_info.name == function_name {
-                // Check various matching patterns for the expected module
-                if func_info.module.contains(expected_module)
-                    || expected_module.contains(&func_info.module)
-                    || self.modules_match(expected_module, &func_info.module)
-                {
-                    return Some(format!("{}.{}", func_info.module, function_name));
-                }
-            }
-        }
-        None
-    }
-
-    fn modules_match(&self, expected: &str, actual: &str) -> bool {
-        // More sophisticated module matching logic
-        // Handle cases where the expected module might be a partial path
-
-        // Split modules into parts
-        let expected_parts: Vec<&str> = expected.split('.').collect();
-        let actual_parts: Vec<&str> = actual.split('.').collect();
-
-        // Check if the expected module is a suffix of the actual module
-        if expected_parts.len() <= actual_parts.len() {
-            let actual_suffix = &actual_parts[actual_parts.len() - expected_parts.len()..];
-            if expected_parts == actual_suffix {
-                return true;
-            }
-        }
-
-        // Check if they share common significant parts (e.g., package name and function)
-        if let (Some(expected_last), Some(actual_last)) =
-            (expected_parts.last(), actual_parts.last())
-        {
-            if expected_last == actual_last {
-                // Check if they share a common package structure
-                let expected_package = expected_parts.get(expected_parts.len().saturating_sub(2));
-                let actual_package = actual_parts.get(actual_parts.len().saturating_sub(2));
-                if expected_package.is_some() && expected_package == actual_package {
-                    return true;
-                }
-            }
-        }
-
-        false
-    }
-
     pub fn build_callgraph(mut self) -> CallGraph {
         // Now that all functions are analyzed, resolve the calls
         self.resolve_all_calls();
 
         CallGraph {
-            functions: self.functions,
+            functions: self
+                .functions
+                .iter()
+                .map(|f| (format!("{}.{}", f.module, f.name), f.clone()))
+                .collect(),
             modules: self.modules,
         }
     }
@@ -569,7 +497,7 @@ impl CallGraphBuilder {
         let functions_clone = self.functions.clone();
         let modules_clone = self.modules.clone();
 
-        for (_, func_info) in self.functions.iter_mut() {
+        for func_info in self.functions.iter_mut() {
             let mut resolved_calls = Vec::new();
 
             for call in &func_info.calls {
@@ -599,7 +527,7 @@ impl CallGraphBuilder {
     fn resolve_call_with_imports(
         call_name: &str,
         calling_module: &str,
-        all_functions: &HashMap<String, FunctionInfo>,
+        all_functions: &[FunctionInfo],
         all_modules: &HashMap<String, ModuleInfo>,
     ) -> Option<String> {
         // Get the module info for the calling module
@@ -660,7 +588,7 @@ impl CallGraphBuilder {
     fn resolve_function_in_module(
         function_name: &str,
         target_module: &str,
-        all_functions: &HashMap<String, FunctionInfo>,
+        all_functions: &[FunctionInfo],
         all_modules: &HashMap<String, ModuleInfo>,
     ) -> Option<String> {
         // First, check if the function is directly defined in this module
@@ -697,15 +625,12 @@ impl CallGraphBuilder {
         None
     }
 
-    fn resolve_yaml_call(
-        call_name: &str,
-        all_functions: &HashMap<String, FunctionInfo>,
-    ) -> Option<String> {
+    fn resolve_yaml_call(call_name: &str, all_functions: &[FunctionInfo]) -> Option<String> {
         // For YAML calls, do simple name matching against all available functions
         // This handles cases like "mzi3" -> "mycspdk.mzi3.mzi3" or "mzi" -> "cspdk.si220.cband.cells.mzis.mzi"
 
         // First, try exact function name match
-        for (_, func_info) in all_functions {
+        for func_info in all_functions {
             if func_info.name == call_name {
                 return Some(format!("{}.{}", func_info.module, func_info.name));
             }
@@ -713,7 +638,7 @@ impl CallGraphBuilder {
 
         // If no exact match found, try matching the last part of compound function names
         // This handles cases where YAML calls "mzi" but the function is named "cells.mzi"
-        for (_, func_info) in all_functions {
+        for func_info in all_functions {
             if func_info.name.contains('.') {
                 if let Some(last_part) = func_info.name.split('.').last() {
                     if last_part == call_name {

@@ -50,7 +50,7 @@ pub fn analyze_yaml_file(
     // Add function to module's function list
     builder.add_function_to_module(&module_name, func_name);
 
-    builder.functions.insert(func_info.name.clone(), func_info);
+    builder.functions.push(func_info);
     Ok(())
 }
 
