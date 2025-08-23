@@ -12,7 +12,7 @@ pub struct CallGraphBuilder {
     pub current_file: String,
     pub current_file_path: PathBuf,
     pub imports: HashMap<String, String>, // alias -> full_module_path
-    pub current_function_defaults: HashMap<String, String>, // param_name -> default_value
+    pub current_function_defaults: HashMap<String, serde_json::Value>, // param_name -> default_value
     pub current_function_component_gets: Vec<String>, // component gets for current function
 }
 
@@ -1002,23 +1002,65 @@ impl CallGraphBuilder {
         }
     }
 
+    fn expr_to_json_value(&self, expr: &ruff_python_ast::Expr) -> serde_json::Value {
+        use ruff_python_ast::Expr;
+
+        match expr {
+            // String literals
+            Expr::StringLiteral(string_lit) => {
+                serde_json::Value::String(string_lit.value.to_string())
+            }
+            // Number literals
+            Expr::NumberLiteral(num_lit) => {
+                match &num_lit.value {
+                    ruff_python_ast::Number::Int(int_val) => {
+                        if let Some(i) = int_val.as_i64() {
+                            serde_json::Value::Number(serde_json::Number::from(i))
+                        } else {
+                            // Fallback to string for very large integers
+                            serde_json::Value::String(int_val.to_string())
+                        }
+                    }
+                    ruff_python_ast::Number::Float(float_val) => {
+                        if let Some(f) = serde_json::Number::from_f64(*float_val) {
+                            serde_json::Value::Number(f)
+                        } else {
+                            serde_json::Value::String(float_val.to_string())
+                        }
+                    }
+                    ruff_python_ast::Number::Complex { real, imag } => {
+                        // Complex numbers as strings since JSON doesn't support them natively
+                        serde_json::Value::String(format!("({real}+{imag}j)"))
+                    }
+                }
+            }
+            // Boolean literals
+            Expr::BooleanLiteral(bool_lit) => serde_json::Value::Bool(bool_lit.value),
+            // None literal
+            Expr::NoneLiteral(_) => serde_json::Value::Null,
+            // Variable names and other expressions as strings
+            _ => {
+                if let Some(var_name) = self.get_variable_name(expr) {
+                    serde_json::Value::String(var_name)
+                } else {
+                    serde_json::Value::String("<unknown>".to_string())
+                }
+            }
+        }
+    }
+
     fn extract_parameter_defaults(
         &self,
         parameters: &ruff_python_ast::Parameters,
-    ) -> std::collections::HashMap<String, String> {
+    ) -> std::collections::HashMap<String, serde_json::Value> {
         let mut defaults = std::collections::HashMap::new();
 
         // Extract defaults from regular args with defaults
         for arg in &parameters.args {
             if let Some(default_expr) = &arg.default {
                 let param_name = arg.parameter.name.to_string();
-
-                // Try to extract the default value
-                if let Some(string_value) = self.get_string_literal(default_expr) {
-                    defaults.insert(param_name, format!("\"{}\"", string_value));
-                } else if let Some(var_name) = self.get_variable_name(default_expr) {
-                    defaults.insert(param_name, var_name);
-                }
+                let default_value = self.expr_to_json_value(default_expr);
+                defaults.insert(param_name, default_value);
             }
         }
 
@@ -1026,13 +1068,8 @@ impl CallGraphBuilder {
         for arg in &parameters.kwonlyargs {
             if let Some(default_expr) = &arg.default {
                 let param_name = arg.parameter.name.to_string();
-
-                // Try to extract the default value
-                if let Some(string_value) = self.get_string_literal(default_expr) {
-                    defaults.insert(param_name, format!("\"{}\"", string_value));
-                } else if let Some(var_name) = self.get_variable_name(default_expr) {
-                    defaults.insert(param_name, var_name);
-                }
+                let default_value = self.expr_to_json_value(default_expr);
+                defaults.insert(param_name, default_value);
             }
         }
 
@@ -1065,21 +1102,33 @@ impl CallGraphBuilder {
         "unknown".to_string()
     }
 
-    fn resolve_component_argument_recursively(&self, value: &str, current_module: &str) -> String {
-        // If it's already a string literal, return as-is
-        if value.starts_with('"') && value.ends_with('"') {
-            return value.to_string();
-        }
+    fn resolve_component_argument_recursively(
+        &self,
+        value: &serde_json::Value,
+        current_module: &str,
+    ) -> String {
+        match value {
+            // If it's already a string, return it quoted
+            serde_json::Value::String(s) => format!("\"{}\"", s),
 
-        // Try to resolve as a module constant
-        if let Some(module_info) = self.modules.get(current_module) {
-            if let Some(constant_value) = module_info.constants.get(value) {
-                return format!("\"{}\"", constant_value);
+            // For other JSON values, try to resolve as variable names
+            _ => {
+                let value_str = match value {
+                    serde_json::Value::String(s) => s.clone(),
+                    _ => value.to_string().trim_matches('"').to_string(),
+                };
+
+                // Try to resolve as a module constant
+                if let Some(module_info) = self.modules.get(current_module) {
+                    if let Some(constant_value) = module_info.constants.get(&value_str) {
+                        return format!("\"{}\"", constant_value);
+                    }
+                }
+
+                // Return as variable name if we can't resolve further
+                value_str
             }
         }
-
-        // Return as variable name if we can't resolve further
-        value.to_string()
     }
 
     fn extract_component_name_from_get(component_get: &str) -> Option<String> {

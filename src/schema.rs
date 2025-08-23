@@ -16,7 +16,7 @@ pub struct FunctionInfo {
     pub decorators: Vec<String>,
     pub resolved_calls: Vec<String>,
     pub resolved_decorators: Vec<String>,
-    pub parameter_defaults: std::collections::HashMap<String, String>,
+    pub parameter_defaults: std::collections::HashMap<String, serde_json::Value>,
     pub component_gets: Vec<String>,
     pub resolved_component_gets: Vec<String>,
 }
