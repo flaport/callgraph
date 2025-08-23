@@ -729,22 +729,21 @@ impl CallGraphBuilder {
             // Resolve component_gets (similar to YAML resolution)
             let mut resolved_component_gets = Vec::new();
             for component_get in &func_info.component_gets {
-                if let Some(component_name) = Self::extract_component_name_from_get(component_get) {
-                    // First try to resolve as a YAML call (simple function name)
-                    if let Some(resolved) =
-                        Self::resolve_yaml_call(&component_name, &functions_clone, yaml_prefix)
-                    {
+                let component_name = component_get.trim_matches('"');
+                // First try to resolve as a YAML call (simple function name)
+                if let Some(resolved) =
+                    Self::resolve_yaml_call(&component_name, &functions_clone, yaml_prefix)
+                {
+                    resolved_component_gets.push(resolved);
+                } else if component_name.contains('.') {
+                    // If it's a dotted name and YAML resolution failed, try function call resolution
+                    if let Some(resolved) = Self::resolve_call_with_imports(
+                        &component_name,
+                        &func_info.module,
+                        &functions_clone,
+                        &modules_clone,
+                    ) {
                         resolved_component_gets.push(resolved);
-                    } else if component_name.contains('.') {
-                        // If it's a dotted name and YAML resolution failed, try function call resolution
-                        if let Some(resolved) = Self::resolve_call_with_imports(
-                            &component_name,
-                            &func_info.module,
-                            &functions_clone,
-                            &modules_clone,
-                        ) {
-                            resolved_component_gets.push(resolved);
-                        }
                     }
                 }
             }
@@ -960,8 +959,7 @@ impl CallGraphBuilder {
                                 self.derive_module(&self.current_file_path, lib_root);
                             let resolved_component_name =
                                 self.resolve_component_argument(first_arg, &current_module);
-                            let component_get_info =
-                                format!("get_component({})", resolved_component_name);
+                            let component_get_info = resolved_component_name;
                             self.current_function_component_gets
                                 .push(component_get_info);
                         }
@@ -1112,7 +1110,7 @@ impl CallGraphBuilder {
     fn resolve_component_argument(&self, arg_expr: &Expr, current_module: &str) -> String {
         // First try direct resolution
         if let Some(string_literal) = self.get_string_literal(arg_expr) {
-            return format!("\"{}\"", string_literal);
+            return string_literal;
         }
 
         if let Some(var_name) = self.get_variable_name(arg_expr) {
@@ -1124,7 +1122,7 @@ impl CallGraphBuilder {
             // Try to resolve from module constants
             if let Some(module_info) = self.modules.get(current_module) {
                 if let Some(constant_value) = module_info.constants.get(&var_name) {
-                    return format!("\"{}\"", constant_value);
+                    return constant_value.clone();
                 }
             }
 
@@ -1141,8 +1139,8 @@ impl CallGraphBuilder {
         current_module: &str,
     ) -> String {
         match value {
-            // If it's already a string, return it quoted
-            serde_json::Value::String(s) => format!("\"{}\"", s),
+            // If it's already a string, return it unquoted
+            serde_json::Value::String(s) => s.clone(),
 
             // For other JSON values, try to resolve as variable names
             _ => {
@@ -1154,7 +1152,7 @@ impl CallGraphBuilder {
                 // Try to resolve as a module constant
                 if let Some(module_info) = self.modules.get(current_module) {
                     if let Some(constant_value) = module_info.constants.get(&value_str) {
-                        return format!("\"{}\"", constant_value);
+                        return constant_value.clone();
                     }
                 }
 
@@ -1162,33 +1160,6 @@ impl CallGraphBuilder {
                 value_str
             }
         }
-    }
-
-    fn extract_component_name_from_get(component_get: &str) -> Option<String> {
-        // Parse strings like:
-        // "get_component(\"coupler\")" -> "coupler"
-        // "get_component(combiner)" -> "combiner"
-        // "get_component(cells.pad)" -> "cells.pad"
-
-        if let Some(start) = component_get.find("get_component(") {
-            let start_idx = start + "get_component(".len();
-            if let Some(end) = component_get.rfind(')') {
-                let arg = &component_get[start_idx..end];
-
-                // Remove surrounding quotes if present
-                let cleaned_arg = if (arg.starts_with('"') && arg.ends_with('"'))
-                    || (arg.starts_with('\'') && arg.ends_with('\''))
-                {
-                    &arg[1..arg.len() - 1]
-                } else {
-                    arg
-                };
-
-                return Some(cleaned_arg.to_string());
-            }
-        }
-
-        None
     }
 
     fn detect_partial_assignments(
