@@ -23,6 +23,10 @@ struct Args {
     /// Select a specific nested key from the output using dot notation (e.g., "functions.mzi3.resolved_calls")
     #[arg(short, long)]
     select: Option<String>,
+
+    /// Prefix for resolving YAML function calls (e.g., "cspdk.si220.cband")
+    #[arg(long)]
+    prefix: Option<String>,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -78,13 +82,22 @@ fn main() -> anyhow::Result<()> {
         }
     }
 
-    let mut callgraph = builder.build_callgraph();
+    let mut callgraph = builder.build_callgraph(&args.prefix);
 
     // Filter to specific function if requested
     if let Some(function_name) = &args.function {
-        if let Some(func_info) = callgraph.functions.get(function_name) {
+        // Find function by name (could be just function name or full resolved name)
+        let matching_function = callgraph
+            .functions
+            .iter()
+            .find(|(resolved_name, func_info)| {
+                // Match either the full resolved name or just the function name
+                *resolved_name == function_name || func_info.name == *function_name
+            });
+
+        if let Some((resolved_name, func_info)) = matching_function {
             let mut filtered_functions = HashMap::new();
-            filtered_functions.insert(function_name.clone(), func_info.clone());
+            filtered_functions.insert(resolved_name.clone(), func_info.clone());
             let filtered_modules = filtered_functions
                 .iter()
                 .filter_map(|(_, ff)| callgraph.modules.get(&ff.module))

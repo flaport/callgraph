@@ -479,9 +479,9 @@ impl CallGraphBuilder {
         }
     }
 
-    pub fn build_callgraph(mut self) -> CallGraph {
+    pub fn build_callgraph(mut self, yaml_prefix: &Option<String>) -> CallGraph {
         // Now that all functions are analyzed, resolve the calls
-        self.resolve_all_calls();
+        self.resolve_all_calls(yaml_prefix);
 
         CallGraph {
             functions: self
@@ -493,7 +493,7 @@ impl CallGraphBuilder {
         }
     }
 
-    fn resolve_all_calls(&mut self) {
+    fn resolve_all_calls(&mut self, yaml_prefix: &Option<String>) {
         let functions_clone = self.functions.clone();
         let modules_clone = self.modules.clone();
 
@@ -503,8 +503,10 @@ impl CallGraphBuilder {
             for call in &func_info.calls {
                 // Check if this is a YAML function (has "yaml" decorator)
                 if func_info.decorators.contains(&"yaml".to_string()) {
-                    // For YAML functions, use simple name matching
-                    if let Some(resolved) = Self::resolve_yaml_call(call, &functions_clone) {
+                    // For YAML functions, use simple name matching with prefix filtering
+                    if let Some(resolved) =
+                        Self::resolve_yaml_call(call, &functions_clone, yaml_prefix)
+                    {
                         resolved_calls.push(resolved);
                     }
                 } else {
@@ -625,12 +627,28 @@ impl CallGraphBuilder {
         None
     }
 
-    fn resolve_yaml_call(call_name: &str, all_functions: &[FunctionInfo]) -> Option<String> {
+    fn resolve_yaml_call(
+        call_name: &str,
+        all_functions: &[FunctionInfo],
+        yaml_prefix: &Option<String>,
+    ) -> Option<String> {
         // For YAML calls, do simple name matching against all available functions
-        // This handles cases like "mzi3" -> "mycspdk.mzi3.mzi3" or "mzi" -> "cspdk.si220.cband.cells.mzis.mzi"
+        // If a prefix is provided, only consider functions whose module starts with that prefix
+
+        let candidates: Vec<&FunctionInfo> = all_functions
+            .iter()
+            .filter(|func_info| {
+                // Filter by prefix if provided
+                if let Some(prefix) = yaml_prefix {
+                    func_info.module.starts_with(prefix)
+                } else {
+                    true
+                }
+            })
+            .collect();
 
         // First, try exact function name match
-        for func_info in all_functions {
+        for func_info in &candidates {
             if func_info.name == call_name {
                 return Some(format!("{}.{}", func_info.module, func_info.name));
             }
@@ -638,7 +656,7 @@ impl CallGraphBuilder {
 
         // If no exact match found, try matching the last part of compound function names
         // This handles cases where YAML calls "mzi" but the function is named "cells.mzi"
-        for func_info in all_functions {
+        for func_info in &candidates {
             if func_info.name.contains('.') {
                 if let Some(last_part) = func_info.name.split('.').last() {
                     if last_part == call_name {
