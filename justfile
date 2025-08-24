@@ -68,6 +68,14 @@ clean:
     rm -rf target/wheels/
     rm -rf .venv/
 
+# Install visualization dependencies
+install-viz:
+    uv pip install networkx matplotlib
+
+# Run example visualization
+run-example-viz:
+    uv run python example.py
+
 # Full development setup (create venv, build)
 dev-setup: setup dev-install
 
@@ -79,3 +87,4 @@ info:
     @echo "Call Graph - Static analysis tool for Python and YAML files"
     @echo "CLI usage: just run-example"
     @echo "Python library: just dev-install"
+    @echo "Visualization: just install-viz && just run-example-viz"

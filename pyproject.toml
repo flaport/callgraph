@@ -18,13 +18,18 @@ classifiers = [
 ]
 dynamic = ["version"]
 
-[tool.maturin]
-features = ["python"]
-
-[tool.uv]
-dev-dependencies = [
-    # maturin is run via uv run, no need to install it
+[project.optional-dependencies]
+visualization = [
+    "networkx>=2.5",
+    "matplotlib>=3.0",
+]
+dev = [
+    "maturin>=1.9.3",
+    "pydot>=4.0.1",
+    "scipy>=1.10.1",
+    "networkx>=2.5",
+    "matplotlib>=3.0",
 ]
 
-[tool.uv.sources]
-# Add any custom package sources if needed
+[tool.maturin]
+features = ["python"]

@@ -14,7 +14,7 @@ routes:
       mzi2,o1: mzi1,o3
     routing_strategy: route_bundle
     settings: {}
-nets: [{]
+nets: []
 ports:
   o3: mzi2,o3
   o1: mzi1,o1

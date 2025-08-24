@@ -88,9 +88,27 @@ just run-example     # Run CLI with example: mycspdk cspdk gdsfactory
 just run <args>      # Run CLI with custom arguments
 just build           # Build CLI tool (release)
 just build-python    # Build Python library
+just install-viz     # Install visualization dependencies
+just run-example-viz # Run example visualization
 just test            # Run tests
 just clean           # Clean build artifacts
 ```
+
+## Visualization
+
+The project includes example functions for creating NetworkX graphs and matplotlib plots:
+
+```python
+import example
+
+# Create a NetworkX DiGraph from call graph data
+G = example.create_callgraph(['path/to/library'], include_decorators=True)
+
+# Plot the call graph
+fig = example.plot_callgraph(G, layout='spring', color_by_module=True)
+```
+
+Install visualization dependencies with: `just install-viz` or `uv pip install networkx matplotlib`
 
 ## Installation
 

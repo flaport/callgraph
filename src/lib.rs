@@ -48,12 +48,12 @@ fn generate_call_graph(
                 for file_path in files {
                     if let Err(e) = builder.analyze_file(&file_path, lib_path) {
                         // Log error but continue processing other files
-                        eprintln!("Error processing {}: {}", file_path.display(), e);
+                        // eprintln!("Error processing {}: {}", file_path.display(), e);
                     }
                 }
             }
             Err(e) => {
-                eprintln!("Error finding files in {}: {}", lib_path.display(), e);
+                // eprintln!("Error finding files in {}: {}", lib_path.display(), e);
             }
         }
     }
