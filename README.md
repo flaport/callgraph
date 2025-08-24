@@ -59,6 +59,39 @@ Returns a Python dictionary with the same structure as the CLI JSON output:
 - `functions`: Dictionary of function information keyed by fully qualified name
 - `modules`: Dictionary of module information
 
+## Quick Start
+
+This project uses `uv` for Python package management and `just` for task automation. 
+
+### Prerequisites
+
+1. Install `uv`: `curl -LsSf https://astral.sh/uv/install.sh | sh` (or see [uv installation docs](https://docs.astral.sh/uv/getting-started/installation/))
+2. Install `just`: `brew install just` (or see [just installation docs](https://just.systems/man/en/))
+
+### Development Setup
+
+```bash
+# Set up development environment
+just dev-setup
+
+# Or manually:
+just setup          # Create virtual environment
+source .venv/bin/activate
+just dev-install    # Build and install Python library (uses uv run maturin)
+```
+
+### Common Tasks
+
+```bash
+just                 # Show all available commands
+just run-example     # Run CLI with example: mycspdk cspdk gdsfactory
+just run <args>      # Run CLI with custom arguments
+just build           # Build CLI tool (release)
+just build-python    # Build Python library
+just test            # Run tests
+just clean           # Clean build artifacts
+```
+
 ## Installation
 
 ### CLI Tool
@@ -72,19 +105,18 @@ cargo build --release
 
 ### Python Library
 
-Build the Python library using maturin:
+Build the Python library using uv and maturin:
 
 ```bash
-# Install maturin in a virtual environment
-python -m venv .venv
+# Create and activate virtual environment with uv
+uv venv
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-pip install maturin
 
-# Build and install the Python library
-maturin develop  # For development
+# Build and install the Python library (using uv run to execute maturin)
+uv run maturin develop  # For development
 # or
-maturin build --release  # For production builds
-pip install target/wheels/*.whl
+uv run maturin build --release  # For production builds
+uv pip install target/wheels/*.whl
 ```
 
 Note: The Python library functionality is behind a feature flag. When building with `cargo build`, only the CLI functionality is included. The Python library is built using maturin which automatically enables the `python` feature.

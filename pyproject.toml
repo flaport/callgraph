@@ -20,3 +20,11 @@ dynamic = ["version"]
 
 [tool.maturin]
 features = ["python"]
+
+[tool.uv]
+dev-dependencies = [
+    # maturin is run via uv run, no need to install it
+]
+
+[tool.uv.sources]
+# Add any custom package sources if needed
