@@ -61,9 +61,30 @@ Returns a Python dictionary with the same structure as the CLI JSON output:
 
 ## Installation
 
-Build from source using Rust and maturin:
+### CLI Tool
+
+Build the CLI tool using Cargo:
 
 ```bash
-maturin build --release
+cargo build --release
+./target/release/callgraph --help
+```
+
+### Python Library
+
+Build the Python library using maturin:
+
+```bash
+# Install maturin in a virtual environment
+python -m venv .venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+pip install maturin
+
+# Build and install the Python library
+maturin develop  # For development
+# or
+maturin build --release  # For production builds
 pip install target/wheels/*.whl
 ```
+
+Note: The Python library functionality is behind a feature flag. When building with `cargo build`, only the CLI functionality is included. The Python library is built using maturin which automatically enables the `python` feature.
