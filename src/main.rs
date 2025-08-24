@@ -28,6 +28,10 @@ struct Args {
     /// Prefix for resolving YAML function calls (e.g., "cspdk.si220.cband")
     #[arg(long)]
     prefix: Option<String>,
+
+    /// Simplify
+    #[arg(long)]
+    simplify: bool,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -81,30 +85,35 @@ fn main() -> anyhow::Result<()> {
 
     // Filter to specific function if requested
     if let Some(function_name) = &args.function {
-        // Find function by name (could be just function name or full resolved name)
-        let matching_function = callgraph
-            .functions
-            .iter()
-            .find(|(resolved_name, func_info)| {
-                // Match either the full resolved name or just the function name
-                *resolved_name == function_name || func_info.name == *function_name
-            });
-
-        if let Some((resolved_name, func_info)) = matching_function {
-            let mut filtered_functions = HashMap::new();
-            filtered_functions.insert(resolved_name.clone(), func_info.clone());
-            let filtered_modules = filtered_functions
-                .iter()
-                .filter_map(|(_, ff)| callgraph.modules.get(&ff.module))
-                .collect::<Vec<_>>();
-            callgraph.functions = filtered_functions;
-            callgraph.modules = filtered_modules
-                .into_iter()
-                .map(|m| (m.name.clone(), m.clone()))
-                .collect();
-        } else {
-            anyhow::bail!("Function '{}' not found in the call graph", function_name);
+        let mut filtered = HashMap::new();
+        for (name, func_info) in &callgraph.functions {
+            if name == function_name || func_info.name == *function_name {
+                filtered.insert(name.clone(), func_info.clone());
+            }
         }
+        callgraph.functions = filtered;
+        // // Find function by name (could be just function name or full resolved name)
+        // let matching_function = callgraph
+        //     .functions
+        //     .iter()
+        //     .find(|(resolved_name, func_info)| {
+        //         // Match either the full resolved name or just the function name
+        //         *resolved_name == function_name || func_info.name == *function_name
+        //     });
+        // println!("{:?}", matching_function);
+
+        let modules = callgraph
+            .functions
+            .values()
+            .map(|f| f.module.clone())
+            .collect::<Vec<_>>();
+        let mut filtered = HashMap::new();
+        for (name, mod_info) in callgraph.modules.iter() {
+            if modules.contains(name) {
+                filtered.insert(name.clone(), mod_info.clone());
+            }
+        }
+        callgraph.modules = filtered;
     }
 
     // Serialize to JSON value for potential filtering
