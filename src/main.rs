@@ -1,7 +1,7 @@
 use anyhow::Context;
 use clap::Parser;
 use log::debug;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 use callgraph::builder::CallGraphBuilder;
@@ -92,15 +92,6 @@ fn main() -> anyhow::Result<()> {
             }
         }
         callgraph.functions = filtered;
-        // // Find function by name (could be just function name or full resolved name)
-        // let matching_function = callgraph
-        //     .functions
-        //     .iter()
-        //     .find(|(resolved_name, func_info)| {
-        //         // Match either the full resolved name or just the function name
-        //         *resolved_name == function_name || func_info.name == *function_name
-        //     });
-        // println!("{:?}", matching_function);
 
         let modules = callgraph
             .functions
@@ -116,9 +107,18 @@ fn main() -> anyhow::Result<()> {
         callgraph.modules = filtered;
     }
 
-    // Serialize to JSON value for potential filtering
-    let json_value =
-        serde_json::to_value(&callgraph).context("Failed to serialize call graph to JSON value")?;
+    let json_value = if args.simplify {
+        let mut simple = HashMap::new();
+        for (name, func_info) in &callgraph.functions {
+            let mut calls = HashSet::new();
+            calls.extend(func_info.resolved_calls.clone());
+            calls.extend(func_info.resolved_component_gets.clone());
+            simple.insert(name.clone(), calls);
+        }
+        serde_json::to_value(&simple).context("Failed to serialize call graph to JSON value")?
+    } else {
+        serde_json::to_value(&callgraph).context("Failed to serialize call graph to JSON value")?
+    };
 
     // Apply selection filter if specified
     let output_value = if let Some(select_path) = &args.select {
