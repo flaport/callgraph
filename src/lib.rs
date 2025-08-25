@@ -6,4 +6,4 @@ pub mod walk;
 pub mod yaml;
 
 #[cfg(feature = "python")]
-pub mod pylib;
+pub use pylib::*;
