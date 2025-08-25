@@ -843,6 +843,27 @@ impl CallGraphBuilder {
                 return Some(format!("{}.{}", target_module, function_name));
             }
 
+            // Check if the function_name contains dots and might involve aliases within this module
+            if function_name.contains('.') {
+                let parts: Vec<&str> = function_name.split('.').collect();
+                if parts.len() >= 2 {
+                    let first_part = parts[0];
+                    let remaining_parts = parts[1..].join(".");
+                    
+                    // Check if the first part is an alias in this module
+                    if let Some(alias_target) = module_info.aliases.get(first_part) {
+                        // Recursively resolve in the alias target module
+                        return Self::resolve_function_in_module(
+                            &remaining_parts,
+                            alias_target,
+                            all_functions,
+                            all_modules,
+                        );
+                    }
+                }
+            }
+
+
             // If not directly defined, check if it's imported
             // Case 1: Explicit import like "cspdk.si220.cband.cells.mzis.mzi"
             for import in &module_info.imports {
@@ -1027,6 +1048,25 @@ impl CallGraphBuilder {
                     let current_module = self.derive_module(&self.current_file_path, lib_root);
                     for var_name in var_names {
                         self.add_constant_to_module(&current_module, &var_name, &string_value);
+                    }
+                }
+            }
+        } else if let Some(var_value) = self.get_variable_name(&assign_stmt.value) {
+            // Check if this is a simple assignment to a variable/module (like c = components)
+            // Add these as aliases since they're module references, not string constants
+            for target in &assign_stmt.targets {
+                if let Some(var_names) = self.extract_assignment_targets(target) {
+                    let current_module = self.derive_module(&self.current_file_path, lib_root);
+                    for var_name in var_names {
+                        // For module assignments like "c = components", we need to resolve the full path
+                        let full_path = if var_value.contains('.') {
+                            // If it's already a dotted path, use as-is
+                            var_value.clone()
+                        } else {
+                            // If it's a simple name, assume it's relative to current module
+                            format!("{}.{}", current_module, var_value)
+                        };
+                        self.add_alias_to_module(&current_module, &var_name, &full_path);
                     }
                 }
             }
