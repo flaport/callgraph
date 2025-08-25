@@ -133,7 +133,7 @@ fn main() -> anyhow::Result<()> {
     let json_output = serde_json::to_string_pretty(&output_value)
         .context("Failed to serialize output to JSON")?;
 
-    println!("{}", json_output);
+    //println!("{}", json_output);
 
     Ok(())
 }

@@ -88,14 +88,29 @@ def _type(func_info: dict) -> str:
 
 if __name__ == "__main__":
     cwd = Path(__file__).parent
+    projects = Path("~/Projects").expanduser()
+    lib_paths = [cwd / "mycspdk", cwd / "cspdk", cwd / "gdsfactory"]
+    lib_paths = [
+        projects / "jetpack1p1" / "jetpack1p1",
+        projects / "laserpdk" / "laserpdk",
+        projects / "ph18da" / "ph18da",
+        projects / "gdsfactory" / "gdsfactory",
+    ]
     G = create_callgraph(
-        lib_paths=[cwd / "mycspdk", cwd / "cspdk", cwd / "gdsfactory"],
+        lib_paths=lib_paths,
         prefix="cspdk.si220.cband",
     )
-    color_map = {"gdsfactory": "C0", "cspdk": "C1", "mycspdk": "C2"}
+    color_map = {
+        "gdsfactory": "C0",
+        "cspdk": "C1",
+        "mycspdk": "C2",
+        "ph18da": "C3",
+        "laserpdk": "C4",
+        "jetpack1p1": "C5",
+    }
     node_colors = [color_map[G.nodes[n]["type_"]] for n in G.nodes()]
     pos = nx.nx_pydot.graphviz_layout(G, prog="neato")
-    pos = {k: (-y, x) for k, (x, y) in pos.items()}
+    # pos = {k: (-y, x) for k, (x, y) in pos.items()}
     # pos = nx.kamada_kawai_layout(G)
 
     nx.draw(
