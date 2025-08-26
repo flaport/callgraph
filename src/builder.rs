@@ -849,7 +849,7 @@ impl CallGraphBuilder {
                 if parts.len() >= 2 {
                     let first_part = parts[0];
                     let remaining_parts = parts[1..].join(".");
-                    
+
                     // Check if the first part is an alias in this module
                     if let Some(alias_target) = module_info.aliases.get(first_part) {
                         // Recursively resolve in the alias target module

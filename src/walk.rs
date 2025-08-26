@@ -17,7 +17,7 @@ pub fn find_analyzable_files(dir: &Path) -> anyhow::Result<Vec<PathBuf>> {
             if path.components().any(|comp| {
                 comp.as_os_str()
                     .to_str()
-                    .map_or(false, |s| s.starts_with("."))
+                    .map_or(false, |s| s.starts_with(".") && s != ".venv")
             }) {
                 continue;
             }
