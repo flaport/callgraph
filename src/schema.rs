@@ -8,6 +8,13 @@ pub struct CallGraph {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct PartialInfo {
+    pub func: String,
+    pub args: Vec<serde_json::Value>,
+    pub kwargs: HashMap<String, serde_json::Value>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct FunctionInfo {
     pub name: String,
     pub module: String,
@@ -26,7 +33,7 @@ pub struct ModuleInfo {
     pub name: String,
     pub path: String,
     pub functions: Vec<String>,
-    pub partials: Vec<String>,
+    pub partials: HashMap<String, PartialInfo>,
     pub imports: Vec<String>,
     pub aliases: std::collections::HashMap<String, String>,
     pub constants: std::collections::HashMap<String, String>,

@@ -64,7 +64,7 @@ impl CallGraphBuilder {
                 name: module_name.to_string(),
                 path: self.current_file.clone(),
                 functions: vec![function_name.to_string()],
-                partials: Vec::new(),
+                partials: HashMap::new(),
                 imports: Vec::new(),
                 aliases: std::collections::HashMap::new(),
                 constants: std::collections::HashMap::new(),
@@ -86,7 +86,7 @@ impl CallGraphBuilder {
                 name: module_name.to_string(),
                 path: self.current_file.clone(),
                 functions: Vec::new(),
-                partials: Vec::new(),
+                partials: HashMap::new(),
                 imports: vec![import.to_string()],
                 aliases: std::collections::HashMap::new(),
                 constants: std::collections::HashMap::new(),
@@ -96,19 +96,34 @@ impl CallGraphBuilder {
         }
     }
 
-    pub fn add_partial_to_module(&mut self, module_name: &str, partial: &str) {
+    pub fn add_partial_to_module(
+        &mut self,
+        module_name: &str,
+        partial_name: &str,
+        func: &str,
+        args: Vec<serde_json::Value>,
+        kwargs: HashMap<String, serde_json::Value>,
+    ) {
+        let partial_info = crate::schema::PartialInfo {
+            func: func.to_string(),
+            args,
+            kwargs,
+        };
+
         if let Some(module_info) = self.modules.get_mut(module_name) {
-            // Module exists, add partial if not already present
-            if !module_info.partials.contains(&partial.to_string()) {
-                module_info.partials.push(partial.to_string());
-            }
+            // Module exists, add partial
+            module_info
+                .partials
+                .insert(partial_name.to_string(), partial_info);
         } else {
             // Create new module with this partial
+            let mut partials = HashMap::new();
+            partials.insert(partial_name.to_string(), partial_info);
             let module_info = ModuleInfo {
                 name: module_name.to_string(),
                 path: self.current_file.clone(),
                 functions: Vec::new(),
-                partials: vec![partial.to_string()],
+                partials,
                 imports: Vec::new(),
                 aliases: std::collections::HashMap::new(),
                 constants: std::collections::HashMap::new(),
@@ -132,7 +147,7 @@ impl CallGraphBuilder {
                 name: module_name.to_string(),
                 path: self.current_file.clone(),
                 functions: Vec::new(),
-                partials: Vec::new(),
+                partials: HashMap::new(),
                 imports: Vec::new(),
                 aliases,
                 constants: std::collections::HashMap::new(),
@@ -161,7 +176,7 @@ impl CallGraphBuilder {
                 name: module_name.to_string(),
                 path: self.current_file.clone(),
                 functions: Vec::new(),
-                partials: Vec::new(),
+                partials: HashMap::new(),
                 imports: Vec::new(),
                 aliases: std::collections::HashMap::new(),
                 constants,
@@ -181,7 +196,7 @@ impl CallGraphBuilder {
                 name: module_name.to_string(),
                 path: self.current_file.clone(),
                 functions: Vec::new(),
-                partials: Vec::new(),
+                partials: HashMap::new(),
                 imports: Vec::new(),
                 aliases: std::collections::HashMap::new(),
                 constants: std::collections::HashMap::new(),
@@ -863,7 +878,6 @@ impl CallGraphBuilder {
                 }
             }
 
-
             // If not directly defined, check if it's imported
             // Case 1: Explicit import like "cspdk.si220.cband.cells.mzis.mzi"
             for import in &module_info.imports {
@@ -1223,11 +1237,28 @@ impl CallGraphBuilder {
                                     if let Some(wrapped_func_name) =
                                         self.get_function_name(wrapped_func)
                                     {
-                                        let partial_info = format!(
-                                            "{} = partial({})",
-                                            var_name, wrapped_func_name
+                                        // Extract positional arguments (skip the first one which is the function)
+                                        let mut args = Vec::new();
+                                        for arg in call_expr.arguments.args.iter().skip(1) {
+                                            args.push(self.expr_to_json_value(arg));
+                                        }
+
+                                        // Extract keyword arguments
+                                        let mut kwargs = HashMap::new();
+                                        for keyword in &call_expr.arguments.keywords {
+                                            if let Some(arg_name) = &keyword.arg {
+                                                let value = self.expr_to_json_value(&keyword.value);
+                                                kwargs.insert(arg_name.to_string(), value);
+                                            }
+                                        }
+
+                                        self.add_partial_to_module(
+                                            &current_module,
+                                            &var_name,
+                                            &wrapped_func_name,
+                                            args,
+                                            kwargs,
                                         );
-                                        self.add_partial_to_module(&current_module, &partial_info);
                                     }
                                 }
                             }
