@@ -672,9 +672,166 @@ impl CallGraphBuilder {
         }
     }
 
+    fn find_base_function<'a>(
+        mut current_func: &'a FunctionInfo,
+        functions: &'a [FunctionInfo],
+    ) -> &'a FunctionInfo {
+        // Follow the chain of partials until we find a non-partial function
+        while current_func.is_partial && !current_func.resolved_calls.is_empty() {
+            if let Some(wrapped_func_name) = current_func.resolved_calls.first() {
+                // Find the wrapped function
+                let mut wrapped_func = functions
+                    .iter()
+                    .find(|f| format!("{}.{}", f.module, f.name) == *wrapped_func_name);
+
+                // If not found by exact match, try to find by function name alone
+                if wrapped_func.is_none() {
+                    if let Some(function_name) = wrapped_func_name.split('.').last() {
+                        wrapped_func = functions.iter().find(|f| {
+                            f.name == function_name && f.module.starts_with("gdsfactory")
+                        });
+                    }
+                }
+
+                if let Some(found_func) = wrapped_func {
+                    current_func = found_func;
+                } else {
+                    break; // Can't find the wrapped function, stop here
+                }
+            } else {
+                break; // No resolved calls, stop here
+            }
+        }
+        current_func
+    }
+
+    fn apply_partial_overrides(
+        func: &mut FunctionInfo,
+        functions: &[FunctionInfo],
+        modules: &std::collections::HashMap<String, crate::schema::ModuleInfo>,
+    ) {
+        // Collect all partial overrides by following the chain
+        let mut overrides = std::collections::HashMap::new();
+
+        // Start with the current partial's overrides
+        if let Some(module_info) = modules.get(&func.module) {
+            if let Some(partial_info) = module_info.partials.get(&func.name) {
+                for (key, value) in &partial_info.kwargs {
+                    overrides.insert(key.clone(), value.clone());
+                }
+            }
+        }
+
+        // Follow the chain and collect overrides from each partial
+        let mut current_func_name = func.resolved_calls.first().cloned();
+        while let Some(wrapped_func_name) = current_func_name {
+            // Find the wrapped function
+            let mut wrapped_func = functions
+                .iter()
+                .find(|f| format!("{}.{}", f.module, f.name) == wrapped_func_name);
+
+            if wrapped_func.is_none() {
+                if let Some(function_name) = wrapped_func_name.split('.').last() {
+                    wrapped_func = functions
+                        .iter()
+                        .find(|f| f.name == function_name && f.module.starts_with("gdsfactory"));
+                }
+            }
+
+            if let Some(found_func) = wrapped_func {
+                if found_func.is_partial {
+                    // Get the partial info for this function
+                    if let Some(module_info) = modules.get(&found_func.module) {
+                        if let Some(partial_info) = module_info.partials.get(&found_func.name) {
+                            for (key, value) in &partial_info.kwargs {
+                                // Only add if not already overridden by a more specific partial
+                                if !overrides.contains_key(key) {
+                                    overrides.insert(key.clone(), value.clone());
+                                }
+                            }
+                        }
+                    }
+                    current_func_name = found_func.resolved_calls.first().cloned();
+                } else {
+                    break; // Reached the base function
+                }
+            } else {
+                break; // Can't find the function
+            }
+        }
+
+        // Apply all collected overrides
+        for (key, value) in overrides {
+            func.parameter_defaults.insert(key, value);
+        }
+    }
+
+    fn populate_partial_function_details(&mut self) {
+        // Create a clone of functions to avoid borrowing issues
+        let functions_clone = self.functions.clone();
+
+        // Find all partial functions and update their details
+        for func in self.functions.iter_mut() {
+            if func.is_partial && !func.resolved_calls.is_empty() {
+                // Get the wrapped function from resolved_calls (should have exactly one)
+                if let Some(wrapped_func_name) = func.resolved_calls.first() {
+                    // Find the wrapped function by exact match first
+                    let mut wrapped_func = functions_clone
+                        .iter()
+                        .find(|f| format!("{}.{}", f.module, f.name) == *wrapped_func_name);
+
+                    // If not found by exact match, try to find by function name alone
+                    // This handles cases where resolution gives us "gdsfactory.routing.route_bundle_electrical"
+                    // but the actual function is "gdsfactory.routing.route_bundle.route_bundle_electrical"
+                    if wrapped_func.is_none() {
+                        if let Some(function_name) = wrapped_func_name.split('.').last() {
+                            wrapped_func = functions_clone.iter().find(|f| {
+                                f.name == function_name && f.module.starts_with("gdsfactory")
+                            });
+                        }
+                    }
+
+                    if let Some(wrapped_func) = wrapped_func {
+                        // Find the original base function by following the chain of partials
+                        let base_func = Self::find_base_function(wrapped_func, &functions_clone);
+
+                        // Copy parameter defaults from the base function
+                        func.parameter_defaults = base_func.parameter_defaults.clone();
+
+                        // Override with kwargs from all partials in the chain
+                        Self::apply_partial_overrides(func, &functions_clone, &self.modules);
+
+                        // Copy decorators from the base function (excluding 'partial' decorators)
+                        func.decorators = base_func
+                            .decorators
+                            .iter()
+                            .filter(|d| *d != "partial")
+                            .cloned()
+                            .collect();
+
+                        // Copy resolved decorators from the base function (excluding 'functools.partial')
+                        func.resolved_decorators = base_func
+                            .resolved_decorators
+                            .iter()
+                            .filter(|d| *d != "functools.partial")
+                            .cloned()
+                            .collect();
+
+                        // Copy component gets from the base function
+                        func.component_gets = base_func.component_gets.clone();
+                        func.resolved_component_gets = base_func.resolved_component_gets.clone();
+                    }
+                }
+            }
+        }
+    }
+
     pub fn build_callgraph(mut self, yaml_prefix: &Option<String>) -> CallGraph {
         // Now that all functions are analyzed, resolve the calls
         self.resolve_all_calls(yaml_prefix);
+
+        // After resolving calls, populate partial function details from their wrapped functions
+        self.populate_partial_function_details();
 
         CallGraph {
             functions: self

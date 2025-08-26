@@ -54,6 +54,7 @@ impl FileAnalyzer for YamlAnalyzer {
                     parameter_defaults: std::collections::HashMap::new(),
                     component_gets: Vec::new(),
                     resolved_component_gets: Vec::new(),
+                    is_partial: false,
                 };
 
                 // Add function to module's function list
@@ -81,6 +82,7 @@ impl FileAnalyzer for YamlAnalyzer {
                     parameter_defaults: std::collections::HashMap::new(),
                     component_gets: Vec::new(),
                     resolved_component_gets: Vec::new(),
+                    is_partial: false,
                 };
 
                 // Add function to module's function list
