@@ -26,6 +26,7 @@ pub struct FunctionInfo {
     pub parameter_defaults: std::collections::HashMap<String, serde_json::Value>,
     pub component_gets: Vec<String>,
     pub resolved_component_gets: Vec<String>,
+    pub is_partial: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

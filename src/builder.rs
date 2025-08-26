@@ -505,6 +505,7 @@ impl CallGraphBuilder {
                     parameter_defaults,
                     component_gets: self.current_function_component_gets.clone(),
                     resolved_component_gets: Vec::new(),
+                    is_partial: false,
                 };
 
                 // Add function to module's function list
@@ -556,6 +557,7 @@ impl CallGraphBuilder {
                             parameter_defaults,
                             component_gets: self.current_function_component_gets.clone(),
                             resolved_component_gets: Vec::new(),
+                            is_partial: false,
                         };
 
                         // Add function to module's function list
@@ -1259,6 +1261,20 @@ impl CallGraphBuilder {
                                             args,
                                             kwargs,
                                         );
+                                        let partial_info = FunctionInfo {
+                                            name: var_name.clone(),
+                                            module: current_module.clone(),
+                                            line: assign_stmt.range.start().to_usize(),
+                                            calls: vec![wrapped_func_name],
+                                            decorators: vec![],
+                                            resolved_calls: Vec::new(),
+                                            resolved_decorators: Vec::new(),
+                                            parameter_defaults: HashMap::new(),
+                                            component_gets: Vec::new(),
+                                            resolved_component_gets: Vec::new(),
+                                            is_partial: true,
+                                        };
+                                        self.functions.push(partial_info);
                                     }
                                 }
                             }
