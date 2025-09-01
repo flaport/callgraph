@@ -490,6 +490,9 @@ impl CallGraphBuilder {
                     .filter_map(|decorator| self.get_decorator_name(decorator))
                     .collect();
 
+                // Extract return type annotation
+                let return_annotation = self.extract_return_annotation(func_def);
+
                 // Defer resolution until all functions are analyzed
                 let resolved_calls = Vec::new();
 
@@ -506,6 +509,8 @@ impl CallGraphBuilder {
                     component_gets: self.current_function_component_gets.clone(),
                     resolved_component_gets: Vec::new(),
                     is_partial: false,
+                    return_annotation,
+                    resolved_return_annotation: None,
                 };
 
                 // Add function to module's function list
@@ -542,6 +547,9 @@ impl CallGraphBuilder {
                             .filter_map(|decorator| self.get_decorator_name(decorator))
                             .collect();
 
+                        // Extract return type annotation for methods
+                        let return_annotation = self.extract_return_annotation(method_def);
+
                         // Defer resolution until all functions are analyzed
                         let resolved_calls = Vec::new();
 
@@ -558,6 +566,8 @@ impl CallGraphBuilder {
                             component_gets: self.current_function_component_gets.clone(),
                             resolved_component_gets: Vec::new(),
                             is_partial: false,
+                            return_annotation,
+                            resolved_return_annotation: None,
                         };
 
                         // Add function to module's function list
@@ -653,6 +663,72 @@ impl CallGraphBuilder {
                 }
             }
             _ => None,
+        }
+    }
+
+    fn extract_return_annotation(
+        &self,
+        func_def: &ruff_python_ast::StmtFunctionDef,
+    ) -> Option<String> {
+        func_def
+            .returns
+            .as_ref()
+            .map(|annotation| self.expr_to_string(annotation))
+    }
+
+    fn expr_to_string(&self, expr: &ruff_python_ast::Expr) -> String {
+        use ruff_python_ast::Expr;
+        match expr {
+            Expr::Name(name_expr) => name_expr.id.to_string(),
+            Expr::Attribute(attr_expr) => {
+                format!(
+                    "{}.{}",
+                    self.expr_to_string(&attr_expr.value),
+                    attr_expr.attr
+                )
+            }
+            Expr::Subscript(subscript_expr) => {
+                format!(
+                    "{}[{}]",
+                    self.expr_to_string(&subscript_expr.value),
+                    self.expr_to_string(&subscript_expr.slice)
+                )
+            }
+            Expr::Tuple(tuple_expr) => {
+                let elements: Vec<String> = tuple_expr
+                    .elts
+                    .iter()
+                    .map(|e| self.expr_to_string(e))
+                    .collect();
+                format!("({})", elements.join(", "))
+            }
+            Expr::List(list_expr) => {
+                let elements: Vec<String> = list_expr
+                    .elts
+                    .iter()
+                    .map(|e| self.expr_to_string(e))
+                    .collect();
+                format!("[{}]", elements.join(", "))
+            }
+            Expr::StringLiteral(string_expr) => {
+                format!("\"{}\"", string_expr.value)
+            }
+            Expr::NumberLiteral(num_expr) => match &num_expr.value {
+                ruff_python_ast::Number::Int(int_val) => int_val.to_string(),
+                ruff_python_ast::Number::Float(float_val) => float_val.to_string(),
+                ruff_python_ast::Number::Complex { real, imag } => format!("({real}+{imag}j)"),
+            },
+            Expr::BooleanLiteral(bool_expr) => {
+                format!("{}", bool_expr.value)
+            }
+            Expr::BinOp(binop_expr) => {
+                format!(
+                    "{} | {}",
+                    self.expr_to_string(&binop_expr.left),
+                    self.expr_to_string(&binop_expr.right)
+                )
+            }
+            _ => "<unknown>".to_string(),
         }
     }
 
@@ -820,6 +896,11 @@ impl CallGraphBuilder {
                         // Copy component gets from the base function
                         func.component_gets = base_func.component_gets.clone();
                         func.resolved_component_gets = base_func.resolved_component_gets.clone();
+
+                        // Copy return annotations from the base function
+                        func.return_annotation = base_func.return_annotation.clone();
+                        func.resolved_return_annotation =
+                            base_func.resolved_return_annotation.clone();
                     }
                 }
             }
@@ -841,6 +922,34 @@ impl CallGraphBuilder {
                 .collect(),
             modules: self.modules,
         }
+    }
+
+    fn resolve_type_annotation(
+        annotation: &str,
+        current_module: &str,
+        modules: &std::collections::HashMap<String, crate::schema::ModuleInfo>,
+    ) -> String {
+        // Handle common patterns in type annotations
+        if annotation.contains('.') {
+            // This looks like a qualified type (e.g., "typing.List", "mymodule.MyClass")
+            let parts: Vec<&str> = annotation.split('.').collect();
+            if parts.len() >= 2 {
+                let first_part = parts[0];
+
+                // Check if the first part is an alias in the current module
+                if let Some(module_info) = modules.get(current_module) {
+                    if let Some(resolved_first_part) = module_info.aliases.get(first_part) {
+                        // Replace the first part with the resolved alias
+                        let remaining_parts = parts[1..].join(".");
+                        return format!("{}.{}", resolved_first_part, remaining_parts);
+                    }
+                }
+            }
+        }
+
+        // For now, return the annotation as-is if we can't resolve it
+        // This handles built-in types like str, int, bool, etc.
+        annotation.to_string()
     }
 
     fn resolve_all_calls(&mut self, yaml_prefix: &Option<String>) {
@@ -925,6 +1034,15 @@ impl CallGraphBuilder {
             func_info.resolved_calls = resolved_calls;
             func_info.resolved_decorators = resolved_decorators;
             func_info.resolved_component_gets = resolved_component_gets;
+
+            // Resolve return type annotation
+            if let Some(ref return_annotation) = func_info.return_annotation {
+                func_info.resolved_return_annotation = Some(Self::resolve_type_annotation(
+                    return_annotation,
+                    &func_info.module,
+                    &modules_clone,
+                ));
+            }
         }
     }
 
@@ -1430,6 +1548,8 @@ impl CallGraphBuilder {
                                             component_gets: Vec::new(),
                                             resolved_component_gets: Vec::new(),
                                             is_partial: true,
+                                            return_annotation: None, // Partials don't have their own return annotations
+                                            resolved_return_annotation: None,
                                         };
                                         self.functions.push(partial_info);
                                     }

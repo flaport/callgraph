@@ -55,6 +55,8 @@ impl FileAnalyzer for YamlAnalyzer {
                     component_gets: Vec::new(),
                     resolved_component_gets: Vec::new(),
                     is_partial: false,
+                    return_annotation: None, // YAML functions don't have return annotations
+                    resolved_return_annotation: None,
                 };
 
                 // Add function to module's function list
@@ -83,6 +85,8 @@ impl FileAnalyzer for YamlAnalyzer {
                     component_gets: Vec::new(),
                     resolved_component_gets: Vec::new(),
                     is_partial: false,
+                    return_annotation: None, // YAML functions don't have return annotations
+                    resolved_return_annotation: None,
                 };
 
                 // Add function to module's function list

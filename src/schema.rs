@@ -27,6 +27,8 @@ pub struct FunctionInfo {
     pub component_gets: Vec<String>,
     pub resolved_component_gets: Vec<String>,
     pub is_partial: bool,
+    pub return_annotation: Option<String>,
+    pub resolved_return_annotation: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
