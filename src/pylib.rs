@@ -14,19 +14,17 @@ fn generate_call_graph(
     function_filter: Option<String>,
     select_path: Option<String>,
 ) -> PyResult<PyObject> {
-    // Extract lib_paths dictionary as an IndexMap to preserve insertion order
-    let dict = lib_paths
-        .extract::<IndexMap<String, String>>()
-        .map_err(|_| {
+    // Iterate over dictionary items explicitly to preserve insertion order
+    let mut lib_paths_map = IndexMap::new();
+
+    // Iterate through the dictionary items to preserve Python's insertion order
+    for item in lib_paths.items() {
+        let (key, value) = item.extract::<(String, String)>().map_err(|_| {
             PyErr::new::<pyo3::exceptions::PyValueError, _>(
-                "lib_paths dictionary values must be strings (paths)",
+                "lib_paths dictionary must contain string keys and string values (paths)",
             )
         })?;
-
-    // Convert the string paths to PathBuf while preserving order
-    let mut lib_paths_map = IndexMap::new();
-    for (prefix, path) in dict {
-        lib_paths_map.insert(prefix, PathBuf::from(path));
+        lib_paths_map.insert(key, PathBuf::from(value));
     }
 
     // Build the call graph
