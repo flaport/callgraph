@@ -1,8 +1,8 @@
 use crate::builder::CallGraphBuilder;
 use crate::walk::find_analyzable_files;
+use indexmap::IndexMap;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
-use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 #[cfg(feature = "python")]
@@ -10,35 +10,23 @@ use std::path::PathBuf;
 #[pyo3(signature = (lib_paths, function_filter=None, select_path=None))]
 fn generate_call_graph(
     py: Python,
-    lib_paths: PyObject,
+    lib_paths: Bound<'_, PyDict>,
     function_filter: Option<String>,
     select_path: Option<String>,
 ) -> PyResult<PyObject> {
-    // Parse lib_paths - can be either a dict or a list of "prefix:path" strings
-    let mut lib_paths_map = BTreeMap::new();
-    
-    // Try to extract as a dict first
-    if let Ok(dict) = lib_paths.extract::<std::collections::HashMap<String, String>>(py) {
-        for (prefix, path) in dict {
-            lib_paths_map.insert(prefix, PathBuf::from(path));
-        }
-    } else if let Ok(list) = lib_paths.extract::<Vec<String>>(py) {
-        // Fall back to list of "prefix:path" strings for backwards compatibility
-        for lib_path_str in list {
-            let parts: Vec<&str> = lib_path_str.splitn(2, ':').collect();
-            if parts.len() != 2 {
-                return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
-                    format!("Invalid lib_path format '{}'. Expected 'prefix:path' or a dict", lib_path_str)
-                ));
-            }
-            let prefix = parts[0].to_string();
-            let path = PathBuf::from(parts[1]);
-            lib_paths_map.insert(prefix, path);
-        }
-    } else {
-        return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
-            "lib_paths must be either a dict or a list of 'prefix:path' strings"
-        ));
+    // Extract lib_paths dictionary as an IndexMap to preserve insertion order
+    let dict = lib_paths
+        .extract::<IndexMap<String, String>>()
+        .map_err(|_| {
+            PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                "lib_paths dictionary values must be strings (paths)",
+            )
+        })?;
+
+    // Convert the string paths to PathBuf while preserving order
+    let mut lib_paths_map = IndexMap::new();
+    for (prefix, path) in dict {
+        lib_paths_map.insert(prefix, PathBuf::from(path));
     }
 
     // Build the call graph

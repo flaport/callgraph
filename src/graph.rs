@@ -1,13 +1,14 @@
 use anyhow::Context;
+use indexmap::IndexMap;
 use log::debug;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 use crate::builder::CallGraphBuilder;
 use crate::walk::find_analyzable_files;
 
 pub fn build_graph(
-    lib_paths: BTreeMap<String, PathBuf>,
+    lib_paths: IndexMap<String, PathBuf>,
     function: Option<String>,
     select: Option<String>,
     simplify: bool,
@@ -16,7 +17,7 @@ pub fn build_graph(
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
     // Validate all paths exist
-    let mut valid_lib_paths = BTreeMap::new();
+    let mut valid_lib_paths = IndexMap::new();
     for (prefix, path) in &lib_paths {
         if !path.exists() {
             debug!(

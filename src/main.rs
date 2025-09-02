@@ -1,6 +1,6 @@
 use anyhow::Context;
 use clap::Parser;
-use std::collections::BTreeMap;
+use indexmap::IndexMap;
 use std::path::PathBuf;
 
 use callgraph::graph::build_graph;
@@ -32,8 +32,8 @@ struct Args {
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
-    // Parse lib_paths into a BTreeMap (sorted map)
-    let mut lib_paths = BTreeMap::new();
+    // Parse lib_paths into an IndexMap (preserves insertion order)
+    let mut lib_paths = IndexMap::new();
     for lib_path_str in &args.lib_paths {
         let parts: Vec<&str> = lib_path_str.splitn(2, ':').collect();
         if parts.len() != 2 {
