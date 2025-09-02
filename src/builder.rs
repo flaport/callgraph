@@ -1092,9 +1092,6 @@ impl CallGraphBuilder {
                     all_modules,
                 ) {
                     return Some(resolved);
-                } else {
-                    // If we can't find the exact function, at least provide the resolved module path
-                    return Some(format!("{}.{}", resolved_module, function_name));
                 }
             }
 
@@ -1181,7 +1178,53 @@ impl CallGraphBuilder {
             // Case 1: Explicit import like "cspdk.si220.cband.cells.mzis.mzi"
             for import in &module_info.imports {
                 if import.ends_with(&format!(".{}", function_name)) {
-                    return Some(import.clone());
+                    // Check if this import is actually a function (exists in all_functions)
+                    // Note: f.name is just the function name, we need to check the full qualified name
+                    let is_function = all_functions.iter().any(|f| {
+                        let full_name = format!("{}.{}", f.module, f.name);
+                        full_name == *import
+                    });
+
+                    if is_function {
+                        return Some(import.clone());
+                    }
+
+                    // If not a function, it might be a module - recursively check
+                    if all_modules.contains_key(import) {
+                        // It's a module, try to find the function within it
+                        if let Some(resolved) = Self::resolve_function_in_module(
+                            function_name,
+                            import,
+                            all_functions,
+                            all_modules,
+                        ) {
+                            return Some(resolved);
+                        }
+                    }
+                }
+            }
+
+            // Also check if there's an alias for this function
+            if let Some(alias_target) = module_info.aliases.get(function_name) {
+                // If the alias points directly to a function
+                let is_function = all_functions.iter().any(|f| {
+                    let full_name = format!("{}.{}", f.module, f.name);
+                    full_name == *alias_target
+                });
+
+                if is_function {
+                    return Some(alias_target.clone());
+                }
+                // If the alias points to a module, recursively check
+                if all_modules.contains_key(alias_target) {
+                    if let Some(resolved) = Self::resolve_function_in_module(
+                        function_name,
+                        alias_target,
+                        all_functions,
+                        all_modules,
+                    ) {
+                        return Some(resolved);
+                    }
                 }
             }
 
