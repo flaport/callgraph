@@ -15,11 +15,12 @@ impl FileAnalyzer for YamlAnalyzer {
         builder: &mut CallGraphBuilder,
         file_path: &Path,
         lib_root: &Path,
+        prefix: &str,
     ) -> anyhow::Result<()> {
         // Extract function name from file name (remove .pic.yml extension)
         let file_name = file_path.file_stem().and_then(|n| n.to_str()).unwrap_or("");
         let func_name = file_name.strip_suffix(".pic").unwrap_or(file_name);
-        let module_name = derive_yaml_module(file_path, lib_root);
+        let module_name = derive_yaml_module(file_path, lib_root, prefix);
 
         let content = fs::read_to_string(file_path)
             .with_context(|| format!("Failed to read YAML file: {}", file_path.display()))?;
@@ -104,15 +105,21 @@ impl FileAnalyzer for YamlAnalyzer {
     }
 }
 
-fn derive_yaml_module(file_path: &Path, lib_root: &Path) -> String {
+fn derive_yaml_module(file_path: &Path, lib_root: &Path, prefix: &str) -> String {
     // Derive module path relative to the library root
-    let parent_lib_root = lib_root.parent().unwrap_or(lib_root);
-    if let Some(relative_path) = file_path.strip_prefix(parent_lib_root).ok() {
-        relative_path
+    if let Some(relative_path) = file_path.strip_prefix(lib_root).ok() {
+        let module_path = relative_path
             .to_str()
             .unwrap_or("")
             .replace(std::path::MAIN_SEPARATOR, ".")
-            .replace(".pic.yml", "_picyml")
+            .replace(".pic.yml", "_picyml");
+        
+        // Combine prefix with the module path
+        if module_path.is_empty() {
+            prefix.to_string()
+        } else {
+            format!("{}.{}", prefix, module_path)
+        }
     } else {
         file_path.to_str().unwrap_or("").to_string()
     }

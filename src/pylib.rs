@@ -2,29 +2,53 @@ use crate::builder::CallGraphBuilder;
 use crate::walk::find_analyzable_files;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
-use std::path::Path;
+use std::collections::BTreeMap;
+use std::path::PathBuf;
 
 #[cfg(feature = "python")]
 #[pyfunction]
-#[pyo3(signature = (lib_paths, prefix=None, function_filter=None, select_path=None))]
+#[pyo3(signature = (lib_paths, function_filter=None, select_path=None))]
 fn generate_call_graph(
     py: Python,
-    lib_paths: Vec<String>,
-    prefix: Option<String>,
+    lib_paths: PyObject,
     function_filter: Option<String>,
     select_path: Option<String>,
 ) -> PyResult<PyObject> {
-    // Convert string paths to Path objects
-    let paths: Vec<&Path> = lib_paths.iter().map(|p| Path::new(p)).collect();
+    // Parse lib_paths - can be either a dict or a list of "prefix:path" strings
+    let mut lib_paths_map = BTreeMap::new();
+    
+    // Try to extract as a dict first
+    if let Ok(dict) = lib_paths.extract::<std::collections::HashMap<String, String>>(py) {
+        for (prefix, path) in dict {
+            lib_paths_map.insert(prefix, PathBuf::from(path));
+        }
+    } else if let Ok(list) = lib_paths.extract::<Vec<String>>(py) {
+        // Fall back to list of "prefix:path" strings for backwards compatibility
+        for lib_path_str in list {
+            let parts: Vec<&str> = lib_path_str.splitn(2, ':').collect();
+            if parts.len() != 2 {
+                return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                    format!("Invalid lib_path format '{}'. Expected 'prefix:path' or a dict", lib_path_str)
+                ));
+            }
+            let prefix = parts[0].to_string();
+            let path = PathBuf::from(parts[1]);
+            lib_paths_map.insert(prefix, path);
+        }
+    } else {
+        return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+            "lib_paths must be either a dict or a list of 'prefix:path' strings"
+        ));
+    }
 
     // Build the call graph
-    let mut builder = CallGraphBuilder::new();
+    let mut builder = CallGraphBuilder::new(lib_paths_map.clone());
 
-    for lib_path in &paths {
+    for (prefix, lib_path) in &lib_paths_map {
         match find_analyzable_files(lib_path) {
             Ok(files) => {
                 for file_path in files {
-                    if let Err(_) = builder.analyze_file(&file_path, lib_path) {
+                    if let Err(_) = builder.analyze_file(&file_path, lib_path, prefix) {
                         // eprintln!("Error processing {}: {}", file_path.display(), e);
                     }
                 }
@@ -35,7 +59,7 @@ fn generate_call_graph(
         }
     }
 
-    let call_graph = builder.build_callgraph(&prefix);
+    let call_graph = builder.build_callgraph();
 
     // Convert to serde_json::Value first
     let mut json_value = serde_json::to_value(&call_graph).map_err(|e| {

@@ -1,5 +1,5 @@
 use ruff_python_ast::{Expr, Stmt};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
 use crate::py::{FileAnalyzer, PythonAnalyzer};
@@ -11,41 +11,46 @@ pub struct CallGraphBuilder {
     pub modules: HashMap<String, ModuleInfo>,
     pub current_file: String,
     pub current_file_path: PathBuf,
+    pub current_prefix: String, // Current prefix being processed
     pub imports: HashMap<String, String>, // alias -> full_module_path
     pub current_function_defaults: HashMap<String, serde_json::Value>, // param_name -> default_value
     pub current_function_component_gets: Vec<String>, // component gets for current function
+    pub lib_paths: BTreeMap<String, PathBuf>, // Sorted mapping of prefix -> library path
 }
 
 impl CallGraphBuilder {
-    pub fn new() -> Self {
+    pub fn new(lib_paths: BTreeMap<String, PathBuf>) -> Self {
         Self {
             functions: Vec::new(),
             modules: HashMap::new(),
             current_file: String::new(),
             current_file_path: PathBuf::new(),
+            current_prefix: String::new(),
             imports: HashMap::new(),
             current_function_defaults: HashMap::new(),
             current_function_component_gets: Vec::new(),
+            lib_paths,
         }
     }
 
-    pub fn analyze_file(&mut self, file_path: &Path, lib_root: &Path) -> anyhow::Result<()> {
+    pub fn analyze_file(&mut self, file_path: &Path, lib_root: &Path, prefix: &str) -> anyhow::Result<()> {
         self.current_file = file_path.display().to_string();
         self.current_file_path = file_path.to_path_buf();
+        self.current_prefix = prefix.to_string();
 
         let file_name = file_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
 
         let result = if file_name.ends_with(".pic.yml") {
-            YamlAnalyzer::analyze_file(self, file_path, lib_root)
+            YamlAnalyzer::analyze_file(self, file_path, lib_root, prefix)
         } else if file_path.extension().map_or(false, |ext| ext == "py") {
-            PythonAnalyzer::analyze_file(self, file_path, lib_root)
+            PythonAnalyzer::analyze_file(self, file_path, lib_root, prefix)
         } else {
             Ok(())
         };
 
         // If there was an error, add it to the module
         if let Err(ref error) = result {
-            let module_name = self.derive_module(file_path, lib_root);
+            let module_name = self.derive_module(file_path, lib_root, prefix);
             self.add_error_to_module(&module_name, &error.to_string());
         }
 
@@ -206,11 +211,10 @@ impl CallGraphBuilder {
         }
     }
 
-    pub fn derive_module(&self, file_path: &Path, lib_root: &Path) -> String {
+    pub fn derive_module(&self, file_path: &Path, lib_root: &Path, prefix: &str) -> String {
         // Derive module path relative to the library root
-        let parent_lib_root = lib_root.parent().unwrap_or(lib_root);
-        if let Some(relative_path) = file_path.strip_prefix(parent_lib_root).ok() {
-            let mut module_name = relative_path
+        if let Some(relative_path) = file_path.strip_prefix(lib_root).ok() {
+            let mut module_path = relative_path
                 .to_str()
                 .unwrap_or("")
                 .replace(std::path::MAIN_SEPARATOR, ".")
@@ -218,14 +222,19 @@ impl CallGraphBuilder {
 
             // Remove .__init__ suffix for package __init__.py files
             // In Python, you import the package, not the __init__ file
-            if module_name.ends_with(".__init__") {
-                module_name = module_name
+            if module_path.ends_with(".__init__") {
+                module_path = module_path
                     .strip_suffix(".__init__")
-                    .unwrap_or(&module_name)
+                    .unwrap_or(&module_path)
                     .to_string();
             }
 
-            module_name
+            // Combine prefix with the module path
+            if module_path.is_empty() {
+                prefix.to_string()
+            } else {
+                format!("{}.{}", prefix, module_path)
+            }
         } else {
             file_path.to_str().unwrap_or("").to_string()
         }
@@ -318,8 +327,8 @@ impl CallGraphBuilder {
         }
     }
 
-    pub fn visit_stmt(&mut self, stmt: &Stmt, lib_root: &Path) {
-        let current_module = self.derive_module(&self.current_file_path, lib_root);
+    pub fn visit_stmt(&mut self, stmt: &Stmt, lib_root: &Path, prefix: &str) {
+        let current_module = self.derive_module(&self.current_file_path, lib_root, prefix);
 
         match stmt {
             Stmt::Import(import_stmt) => {
@@ -458,11 +467,11 @@ impl CallGraphBuilder {
                 // Check for functools.partial assignments
                 // Examples: my_func = functools.partial(some_function, arg1)
                 //           my_func = partial(some_function, arg1)
-                self.detect_partial_assignments(assign_stmt, lib_root);
+                self.detect_partial_assignments(assign_stmt);
 
                 // Check for module-level constants
                 // Examples: gc = "grating_coupler_elliptical"
-                self.detect_constant_assignments(assign_stmt, lib_root);
+                self.detect_constant_assignments(assign_stmt);
             }
             Stmt::FunctionDef(func_def) => {
                 let func_name = func_def.name.to_string();
@@ -480,7 +489,7 @@ impl CallGraphBuilder {
                 for body_stmt in &func_def.body {
                     self.extract_calls_from_stmt(body_stmt, &mut calls);
                     // Also extract component_gets for this function
-                    self.extract_component_gets_from_stmt(body_stmt, lib_root);
+                    self.extract_component_gets_from_stmt(body_stmt);
                 }
 
                 // Extract decorator names
@@ -496,7 +505,7 @@ impl CallGraphBuilder {
                 // Defer resolution until all functions are analyzed
                 let resolved_calls = Vec::new();
 
-                let module_path = self.derive_module(&self.current_file_path, lib_root);
+                let module_path = self.derive_module(&self.current_file_path, lib_root, &self.current_prefix);
                 let func_info = FunctionInfo {
                     name: func_name.clone(),
                     module: module_path.clone(),
@@ -537,7 +546,7 @@ impl CallGraphBuilder {
                         for body_stmt in &method_def.body {
                             self.extract_calls_from_stmt(body_stmt, &mut calls);
                             // Also extract component_gets for this method
-                            self.extract_component_gets_from_stmt(body_stmt, lib_root);
+                            self.extract_component_gets_from_stmt(body_stmt);
                         }
 
                         // Extract decorator names for methods
@@ -553,7 +562,7 @@ impl CallGraphBuilder {
                         // Defer resolution until all functions are analyzed
                         let resolved_calls = Vec::new();
 
-                        let module_path = self.derive_module(&self.current_file_path, lib_root);
+                        let module_path = self.derive_module(&self.current_file_path, lib_root, &self.current_prefix);
                         let func_info = FunctionInfo {
                             name: full_method_name.clone(),
                             module: module_path.clone(),
@@ -907,9 +916,9 @@ impl CallGraphBuilder {
         }
     }
 
-    pub fn build_callgraph(mut self, yaml_prefix: &Option<String>) -> CallGraph {
+    pub fn build_callgraph(mut self) -> CallGraph {
         // Now that all functions are analyzed, resolve the calls
-        self.resolve_all_calls(yaml_prefix);
+        self.resolve_all_calls();
 
         // After resolving calls, populate partial function details from their wrapped functions
         self.populate_partial_function_details();
@@ -952,9 +961,10 @@ impl CallGraphBuilder {
         annotation.to_string()
     }
 
-    fn resolve_all_calls(&mut self, yaml_prefix: &Option<String>) {
+    fn resolve_all_calls(&mut self) {
         let functions_clone = self.functions.clone();
         let modules_clone = self.modules.clone();
+        let lib_paths_clone = self.lib_paths.clone();
 
         for func_info in self.functions.iter_mut() {
             let mut resolved_calls = Vec::new();
@@ -966,7 +976,7 @@ impl CallGraphBuilder {
                 if func_info.decorators.contains(&"yaml".to_string()) {
                     // For YAML functions, use simple name matching with prefix filtering
                     if let Some(resolved) =
-                        Self::resolve_yaml_call(call, &functions_clone, yaml_prefix)
+                        Self::resolve_yaml_call_static(call, &functions_clone, &lib_paths_clone)
                     {
                         resolved_calls.push(resolved);
                     }
@@ -1015,7 +1025,7 @@ impl CallGraphBuilder {
                 let component_name = component_get.trim_matches('"');
                 // First try to resolve as a YAML call (simple function name)
                 if let Some(resolved) =
-                    Self::resolve_yaml_call(&component_name, &functions_clone, yaml_prefix)
+                    Self::resolve_yaml_call_static(&component_name, &functions_clone, &lib_paths_clone)
                 {
                     resolved_component_gets.push(resolved);
                 } else if component_name.contains('.') {
@@ -1183,40 +1193,35 @@ impl CallGraphBuilder {
         None
     }
 
-    fn resolve_yaml_call(
+    fn resolve_yaml_call_static(
         call_name: &str,
         all_functions: &[FunctionInfo],
-        yaml_prefix: &Option<String>,
+        lib_paths: &BTreeMap<String, PathBuf>,
     ) -> Option<String> {
-        // For YAML calls, do simple name matching against all available functions
-        // If a prefix is provided, only consider functions whose module starts with that prefix
+        // For YAML calls, iterate through lib_paths in order to find the first match
+        // This ensures resolution priority based on the order of lib_paths
 
-        let candidates: Vec<&FunctionInfo> = all_functions
-            .iter()
-            .filter(|func_info| {
-                // Filter by prefix if provided
-                if let Some(prefix) = yaml_prefix {
-                    func_info.module.starts_with(prefix)
-                } else {
-                    true
+        for (prefix, _) in lib_paths {
+            let candidates: Vec<&FunctionInfo> = all_functions
+                .iter()
+                .filter(|func_info| func_info.module.starts_with(prefix))
+                .collect();
+
+            // First, try exact function name match
+            for func_info in &candidates {
+                if func_info.name == call_name {
+                    return Some(format!("{}.{}", func_info.module, func_info.name));
                 }
-            })
-            .collect();
-
-        // First, try exact function name match
-        for func_info in &candidates {
-            if func_info.name == call_name {
-                return Some(format!("{}.{}", func_info.module, func_info.name));
             }
-        }
 
-        // If no exact match found, try matching the last part of compound function names
-        // This handles cases where YAML calls "mzi" but the function is named "cells.mzi"
-        for func_info in &candidates {
-            if func_info.name.contains('.') {
-                if let Some(last_part) = func_info.name.split('.').last() {
-                    if last_part == call_name {
-                        return Some(format!("{}.{}", func_info.module, func_info.name));
+            // If no exact match found, try matching the last part of compound function names
+            // This handles cases where YAML calls "mzi" but the function is named "cells.mzi"
+            for func_info in &candidates {
+                if func_info.name.contains('.') {
+                    if let Some(last_part) = func_info.name.split('.').last() {
+                        if last_part == call_name {
+                            return Some(format!("{}.{}", func_info.module, func_info.name));
+                        }
                     }
                 }
             }
@@ -1225,41 +1230,41 @@ impl CallGraphBuilder {
         None
     }
 
-    fn extract_component_gets_from_stmt(&mut self, stmt: &Stmt, lib_root: &Path) {
+    fn extract_component_gets_from_stmt(&mut self, stmt: &Stmt) {
         match stmt {
             Stmt::Expr(expr_stmt) => {
-                self.extract_component_gets_from_expr(&expr_stmt.value, lib_root);
+                self.extract_component_gets_from_expr(&expr_stmt.value);
             }
             Stmt::Assign(assign_stmt) => {
-                self.extract_component_gets_from_expr(&assign_stmt.value, lib_root);
+                self.extract_component_gets_from_expr(&assign_stmt.value);
             }
             Stmt::Return(return_stmt) => {
                 if let Some(value) = &return_stmt.value {
-                    self.extract_component_gets_from_expr(value, lib_root);
+                    self.extract_component_gets_from_expr(value);
                 }
             }
             Stmt::If(if_stmt) => {
-                self.extract_component_gets_from_expr(&if_stmt.test, lib_root);
+                self.extract_component_gets_from_expr(&if_stmt.test);
                 for s in &if_stmt.body {
-                    self.extract_component_gets_from_stmt(s, lib_root);
+                    self.extract_component_gets_from_stmt(s);
                 }
                 for s in &if_stmt.elif_else_clauses {
                     for stmt in &s.body {
-                        self.extract_component_gets_from_stmt(stmt, lib_root);
+                        self.extract_component_gets_from_stmt(stmt);
                     }
                 }
             }
             Stmt::For(for_stmt) => {
-                self.extract_component_gets_from_expr(&for_stmt.iter, lib_root);
+                self.extract_component_gets_from_expr(&for_stmt.iter);
                 for s in &for_stmt.body {
-                    self.extract_component_gets_from_stmt(s, lib_root);
+                    self.extract_component_gets_from_stmt(s);
                 }
             }
             _ => {}
         }
     }
 
-    fn extract_component_gets_from_expr(&mut self, expr: &Expr, lib_root: &Path) {
+    fn extract_component_gets_from_expr(&mut self, expr: &Expr) {
         match expr {
             Expr::Call(call_expr) => {
                 // Check if this is a get_component call
@@ -1268,7 +1273,7 @@ impl CallGraphBuilder {
                         // Extract the first argument (component name)
                         if let Some(first_arg) = call_expr.arguments.args.first() {
                             let current_module =
-                                self.derive_module(&self.current_file_path, lib_root);
+                                self.derive_module(&self.current_file_path, &self.lib_paths.get(&self.current_prefix).unwrap(), &self.current_prefix);
                             let resolved_component_name =
                                 self.resolve_component_argument(first_arg, &current_module);
                             let component_get_info = resolved_component_name;
@@ -1279,29 +1284,29 @@ impl CallGraphBuilder {
                 }
 
                 // Recursively process the function being called
-                self.extract_component_gets_from_expr(&call_expr.func, lib_root);
+                self.extract_component_gets_from_expr(&call_expr.func);
 
                 // Process arguments
                 for arg in &call_expr.arguments.args {
-                    self.extract_component_gets_from_expr(arg, lib_root);
+                    self.extract_component_gets_from_expr(arg);
                 }
             }
             Expr::Attribute(attr_expr) => {
                 // Recursively process the value part of the attribute access
-                self.extract_component_gets_from_expr(&attr_expr.value, lib_root);
+                self.extract_component_gets_from_expr(&attr_expr.value);
             }
             Expr::BinOp(binop_expr) => {
-                self.extract_component_gets_from_expr(&binop_expr.left, lib_root);
-                self.extract_component_gets_from_expr(&binop_expr.right, lib_root);
+                self.extract_component_gets_from_expr(&binop_expr.left);
+                self.extract_component_gets_from_expr(&binop_expr.right);
             }
             Expr::List(list_expr) => {
                 for elt in &list_expr.elts {
-                    self.extract_component_gets_from_expr(elt, lib_root);
+                    self.extract_component_gets_from_expr(elt);
                 }
             }
             Expr::Tuple(tuple_expr) => {
                 for elt in &tuple_expr.elts {
-                    self.extract_component_gets_from_expr(elt, lib_root);
+                    self.extract_component_gets_from_expr(elt);
                 }
             }
             _ => {}
@@ -1329,14 +1334,13 @@ impl CallGraphBuilder {
     fn detect_constant_assignments(
         &mut self,
         assign_stmt: &ruff_python_ast::StmtAssign,
-        lib_root: &Path,
     ) {
         // Check if this is a simple assignment to a string literal
         if let Some(string_value) = self.get_string_literal(&assign_stmt.value) {
             // Extract the variable names being assigned to
             for target in &assign_stmt.targets {
                 if let Some(var_names) = self.extract_assignment_targets(target) {
-                    let current_module = self.derive_module(&self.current_file_path, lib_root);
+                    let current_module = self.derive_module(&self.current_file_path, &self.lib_paths.get(&self.current_prefix).unwrap(), &self.current_prefix);
                     for var_name in var_names {
                         self.add_constant_to_module(&current_module, &var_name, &string_value);
                     }
@@ -1347,7 +1351,7 @@ impl CallGraphBuilder {
             // Add these as aliases since they're module references, not string constants
             for target in &assign_stmt.targets {
                 if let Some(var_names) = self.extract_assignment_targets(target) {
-                    let current_module = self.derive_module(&self.current_file_path, lib_root);
+                    let current_module = self.derive_module(&self.current_file_path, &self.lib_paths.get(&self.current_prefix).unwrap(), &self.current_prefix);
                     for var_name in var_names {
                         // For module assignments like "c = components", we need to resolve the full path
                         let full_path = if var_value.contains('.') {
@@ -1496,7 +1500,6 @@ impl CallGraphBuilder {
     fn detect_partial_assignments(
         &mut self,
         assign_stmt: &ruff_python_ast::StmtAssign,
-        lib_root: &Path,
     ) {
         // Check if the assignment value is a call to functools.partial or partial
         if let Expr::Call(call_expr) = assign_stmt.value.as_ref() {
@@ -1507,7 +1510,7 @@ impl CallGraphBuilder {
                     for target in &assign_stmt.targets {
                         if let Some(var_names) = self.extract_assignment_targets(target) {
                             let current_module =
-                                self.derive_module(&self.current_file_path, lib_root);
+                                self.derive_module(&self.current_file_path, &self.lib_paths.get(&self.current_prefix).unwrap(), &self.current_prefix);
                             for var_name in var_names {
                                 // Get the first argument of partial (the function being wrapped)
                                 if let Some(wrapped_func) = call_expr.arguments.args.first() {

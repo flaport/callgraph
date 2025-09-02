@@ -13,6 +13,7 @@ pub trait FileAnalyzer {
         builder: &mut CallGraphBuilder,
         file_path: &Path,
         lib_root: &Path,
+        prefix: &str,
     ) -> anyhow::Result<()>;
 }
 
@@ -24,6 +25,7 @@ impl FileAnalyzer for PythonAnalyzer {
         builder: &mut CallGraphBuilder,
         file_path: &Path,
         lib_root: &Path,
+        prefix: &str,
     ) -> anyhow::Result<()> {
         let content = fs::read_to_string(file_path)
             .with_context(|| format!("Failed to read file: {}", file_path.display()))?;
@@ -37,7 +39,7 @@ impl FileAnalyzer for PythonAnalyzer {
                 // Success - parse normally
                 let module = parsed.into_syntax();
                 for stmt in &module.body {
-                    builder.visit_stmt(stmt, lib_root);
+                    builder.visit_stmt(stmt, lib_root, prefix);
                 }
                 Ok(())
             }
@@ -55,11 +57,11 @@ impl FileAnalyzer for PythonAnalyzer {
 
                 // Process successfully parsed statements
                 for stmt in &statements {
-                    builder.visit_stmt(stmt, lib_root);
+                    builder.visit_stmt(stmt, lib_root, prefix);
                 }
 
                 // Add errors to module
-                let module_name = builder.derive_module(file_path, lib_root);
+                let module_name = builder.derive_module(file_path, lib_root, prefix);
                 for error in &errors {
                     builder.add_error_to_module(&module_name, error);
                 }

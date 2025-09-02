@@ -1,64 +1,74 @@
 use anyhow::Context;
 use log::debug;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
 
 use crate::builder::CallGraphBuilder;
 use crate::walk::find_analyzable_files;
 
 pub fn build_graph(
-    paths: Vec<PathBuf>,
+    lib_paths: BTreeMap<String, PathBuf>,
     function: Option<String>,
     select: Option<String>,
-    prefix: Option<String>,
     simplify: bool,
 ) -> anyhow::Result<serde_json::Value> {
     // Initialize logger with INFO level by default, but respect RUST_LOG env var
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
-    // Collect all paths to analyze (main path + dependencies)
-    let _paths = paths;
-    let mut paths = vec![];
-    for path in &_paths {
+    // Validate all paths exist
+    let mut valid_lib_paths = BTreeMap::new();
+    for (prefix, path) in &lib_paths {
         if !path.exists() {
-            debug!("Dependency path does not exist: {}", path.display());
+            debug!(
+                "Library path does not exist: {} -> {}",
+                prefix,
+                path.display()
+            );
             continue;
         }
         if !path.is_dir() {
-            debug!("Dependency path is not a directory: {}", path.display());
+            debug!(
+                "Library path is not a directory: {} -> {}",
+                prefix,
+                path.display()
+            );
             continue;
         }
-        paths.push(path.clone());
-    }
-
-    if paths.len() == 0 {
-        anyhow::bail!("No valid paths given.");
-    }
-
-    let mut builder = CallGraphBuilder::new();
-
-    // Analyze all paths (main + dependencies)
-    for path in &paths {
-        let path = path
+        let canonical_path = path
             .canonicalize()
             .with_context(|| format!("Failed to canonicalize path: {}", path.display()))?;
+        valid_lib_paths.insert(prefix.clone(), canonical_path);
+    }
+
+    if valid_lib_paths.is_empty() {
+        anyhow::bail!("No valid library paths given.");
+    }
+
+    let mut builder = CallGraphBuilder::new(valid_lib_paths.clone());
+
+    // Analyze all library paths
+    for (prefix, path) in &valid_lib_paths {
         let files = find_analyzable_files(&path)
             .with_context(|| format!("Failed to find analyzable files in {}", path.display()))?;
 
         if files.is_empty() {
-            debug!("No Python or YAML files found in {}", path.display());
+            debug!(
+                "No Python or YAML files found in {} ({})",
+                path.display(),
+                prefix
+            );
             continue;
         }
 
         for file_path in files {
-            if let Err(e) = builder.analyze_file(&file_path, &path) {
+            if let Err(e) = builder.analyze_file(&file_path, &path, prefix) {
                 debug!("Failed to analyze {}: {}", file_path.display(), e);
                 // Continue processing - error is now captured in module
             }
         }
     }
 
-    let mut callgraph = builder.build_callgraph(&prefix);
+    let mut callgraph = builder.build_callgraph();
 
     // Filter to specific function if requested
     if let Some(function_name) = &function {
