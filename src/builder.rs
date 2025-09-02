@@ -1,4 +1,4 @@
-use indexmap::IndexMap;
+use indexmap::{IndexMap, IndexSet};
 use ruff_python_ast::{Expr, Stmt};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -8,14 +8,14 @@ use crate::schema::{CallGraph, FunctionInfo, ModuleInfo};
 use crate::yaml::YamlAnalyzer;
 
 pub struct CallGraphBuilder {
-    pub functions: Vec<FunctionInfo>,
+    pub functions: Vec<FunctionInfo>, // Keep as Vec since we build incrementally
     pub modules: HashMap<String, ModuleInfo>,
     pub current_file: String,
     pub current_file_path: PathBuf,
     pub current_prefix: String,           // Current prefix being processed
     pub imports: HashMap<String, String>, // alias -> full_module_path
     pub current_function_defaults: HashMap<String, serde_json::Value>, // param_name -> default_value
-    pub current_function_component_gets: Vec<String>, // component gets for current function
+    pub current_function_component_gets: IndexSet<String>, // component gets for current function
     pub lib_paths: IndexMap<String, PathBuf>, // Ordered mapping of prefix -> library path (preserves insertion order)
 }
 
@@ -29,7 +29,7 @@ impl CallGraphBuilder {
             current_prefix: String::new(),
             imports: HashMap::new(),
             current_function_defaults: HashMap::new(),
-            current_function_component_gets: Vec::new(),
+            current_function_component_gets: IndexSet::new(),
             lib_paths,
         }
     }
@@ -66,20 +66,18 @@ impl CallGraphBuilder {
     pub fn add_function_to_module(&mut self, module_name: &str, function_name: &str) {
         if let Some(module_info) = self.modules.get_mut(module_name) {
             // Module exists, add function if not already present
-            if !module_info.functions.contains(&function_name.to_string()) {
-                module_info.functions.push(function_name.to_string());
-            }
+            module_info.functions.insert(function_name.to_string());
         } else {
             // Create new module
             let module_info = ModuleInfo {
                 name: module_name.to_string(),
                 path: self.current_file.clone(),
-                functions: vec![function_name.to_string()],
+                functions: IndexSet::from([function_name.to_string()]),
                 partials: HashMap::new(),
-                imports: Vec::new(),
+                imports: IndexSet::new(),
                 aliases: std::collections::HashMap::new(),
                 constants: std::collections::HashMap::new(),
-                errors: Vec::new(),
+                errors: IndexSet::new(),
             };
             self.modules.insert(module_name.to_string(), module_info);
         }
@@ -88,20 +86,18 @@ impl CallGraphBuilder {
     pub fn add_import_to_module(&mut self, module_name: &str, import: &str) {
         if let Some(module_info) = self.modules.get_mut(module_name) {
             // Module exists, add import if not already present
-            if !module_info.imports.contains(&import.to_string()) {
-                module_info.imports.push(import.to_string());
-            }
+            module_info.imports.insert(import.to_string());
         } else {
             // Create new module with this import
             let module_info = ModuleInfo {
                 name: module_name.to_string(),
                 path: self.current_file.clone(),
-                functions: Vec::new(),
+                functions: IndexSet::new(),
                 partials: HashMap::new(),
-                imports: vec![import.to_string()],
+                imports: IndexSet::from([import.to_string()]),
                 aliases: std::collections::HashMap::new(),
                 constants: std::collections::HashMap::new(),
-                errors: Vec::new(),
+                errors: IndexSet::new(),
             };
             self.modules.insert(module_name.to_string(), module_info);
         }
@@ -133,12 +129,12 @@ impl CallGraphBuilder {
             let module_info = ModuleInfo {
                 name: module_name.to_string(),
                 path: self.current_file.clone(),
-                functions: Vec::new(),
+                functions: IndexSet::new(),
                 partials,
-                imports: Vec::new(),
+                imports: IndexSet::new(),
                 aliases: std::collections::HashMap::new(),
                 constants: std::collections::HashMap::new(),
-                errors: Vec::new(),
+                errors: IndexSet::new(),
             };
             self.modules.insert(module_name.to_string(), module_info);
         }
@@ -157,12 +153,12 @@ impl CallGraphBuilder {
             let module_info = ModuleInfo {
                 name: module_name.to_string(),
                 path: self.current_file.clone(),
-                functions: Vec::new(),
+                functions: IndexSet::new(),
                 partials: HashMap::new(),
-                imports: Vec::new(),
+                imports: IndexSet::new(),
                 aliases,
                 constants: std::collections::HashMap::new(),
-                errors: Vec::new(),
+                errors: IndexSet::new(),
             };
             self.modules.insert(module_name.to_string(), module_info);
         }
@@ -186,12 +182,12 @@ impl CallGraphBuilder {
             let module_info = ModuleInfo {
                 name: module_name.to_string(),
                 path: self.current_file.clone(),
-                functions: Vec::new(),
+                functions: IndexSet::new(),
                 partials: HashMap::new(),
-                imports: Vec::new(),
+                imports: IndexSet::new(),
                 aliases: std::collections::HashMap::new(),
                 constants,
-                errors: Vec::new(),
+                errors: IndexSet::new(),
             };
             self.modules.insert(module_name.to_string(), module_info);
         }
@@ -200,18 +196,18 @@ impl CallGraphBuilder {
     pub fn add_error_to_module(&mut self, module_name: &str, error: &str) {
         if let Some(module_info) = self.modules.get_mut(module_name) {
             // Module exists, set error
-            module_info.errors.push(error.to_string());
+            module_info.errors.insert(error.to_string());
         } else {
             // Create new module with error
             let module_info = ModuleInfo {
                 name: module_name.to_string(),
                 path: self.current_file.clone(),
-                functions: Vec::new(),
+                functions: IndexSet::new(),
                 partials: HashMap::new(),
-                imports: Vec::new(),
+                imports: IndexSet::new(),
                 aliases: std::collections::HashMap::new(),
                 constants: std::collections::HashMap::new(),
-                errors: vec![error.to_string()],
+                errors: IndexSet::from([error.to_string()]),
             };
             self.modules.insert(module_name.to_string(), module_info);
         }
@@ -481,7 +477,7 @@ impl CallGraphBuilder {
             }
             Stmt::FunctionDef(func_def) => {
                 let func_name = func_def.name.to_string();
-                let mut calls = Vec::new();
+                let mut calls = IndexSet::new();
 
                 // Extract parameter defaults first
                 let parameter_defaults = self.extract_parameter_defaults(&func_def.parameters);
@@ -509,7 +505,7 @@ impl CallGraphBuilder {
                 let return_annotation = self.extract_return_annotation(func_def);
 
                 // Defer resolution until all functions are analyzed
-                let resolved_calls = Vec::new();
+                let resolved_calls = IndexSet::new();
 
                 let module_path =
                     self.derive_module(&self.current_file_path, lib_root, &self.current_prefix);
@@ -520,10 +516,10 @@ impl CallGraphBuilder {
                     calls,
                     decorators,
                     resolved_calls,
-                    resolved_decorators: Vec::new(),
+                    resolved_decorators: IndexSet::new(),
                     parameter_defaults,
                     component_gets: self.current_function_component_gets.clone(),
-                    resolved_component_gets: Vec::new(),
+                    resolved_component_gets: IndexSet::new(),
                     is_partial: false,
                     return_annotation,
                     resolved_return_annotation: None,
@@ -538,7 +534,7 @@ impl CallGraphBuilder {
                 for class_stmt in &class_def.body {
                     if let Stmt::FunctionDef(method_def) = class_stmt {
                         let full_method_name = format!("{}.{}", class_def.name, method_def.name);
-                        let mut calls = Vec::new();
+                        let mut calls = IndexSet::new();
 
                         // Extract parameter defaults for methods first
                         let parameter_defaults =
@@ -567,7 +563,7 @@ impl CallGraphBuilder {
                         let return_annotation = self.extract_return_annotation(method_def);
 
                         // Defer resolution until all functions are analyzed
-                        let resolved_calls = Vec::new();
+                        let resolved_calls = IndexSet::new();
 
                         let module_path = self.derive_module(
                             &self.current_file_path,
@@ -581,10 +577,10 @@ impl CallGraphBuilder {
                             calls,
                             decorators,
                             resolved_calls,
-                            resolved_decorators: Vec::new(),
+                            resolved_decorators: IndexSet::new(),
                             parameter_defaults,
                             component_gets: self.current_function_component_gets.clone(),
-                            resolved_component_gets: Vec::new(),
+                            resolved_component_gets: IndexSet::new(),
                             is_partial: false,
                             return_annotation,
                             resolved_return_annotation: None,
@@ -601,7 +597,7 @@ impl CallGraphBuilder {
         }
     }
 
-    fn extract_calls_from_stmt(&self, stmt: &Stmt, calls: &mut Vec<String>) {
+    fn extract_calls_from_stmt(&self, stmt: &Stmt, calls: &mut IndexSet<String>) {
         match stmt {
             Stmt::Expr(expr_stmt) => {
                 self.extract_calls_from_expr(&expr_stmt.value, calls);
@@ -635,11 +631,11 @@ impl CallGraphBuilder {
         }
     }
 
-    fn extract_calls_from_expr(&self, expr: &Expr, calls: &mut Vec<String>) {
+    fn extract_calls_from_expr(&self, expr: &Expr, calls: &mut IndexSet<String>) {
         match expr {
             Expr::Call(call_expr) => {
                 if let Some(func_name) = self.get_function_name(&call_expr.func) {
-                    calls.push(func_name);
+                    calls.insert(func_name);
                 }
 
                 // Recursively process the function being called (for method chains)
@@ -978,8 +974,8 @@ impl CallGraphBuilder {
         let lib_paths_clone = self.lib_paths.clone();
 
         for func_info in self.functions.iter_mut() {
-            let mut resolved_calls = Vec::new();
-            let mut resolved_decorators = Vec::new();
+            let mut resolved_calls = IndexSet::new();
+            let mut resolved_decorators = IndexSet::new();
 
             // Resolve calls
             for call in &func_info.calls {
@@ -989,7 +985,7 @@ impl CallGraphBuilder {
                     if let Some(resolved) =
                         Self::resolve_yaml_call_static(call, &functions_clone, &lib_paths_clone)
                     {
-                        resolved_calls.push(resolved);
+                        resolved_calls.insert(resolved);
                     }
                 } else {
                     // For Python functions, use import-aware resolution
@@ -999,7 +995,7 @@ impl CallGraphBuilder {
                         &functions_clone,
                         &modules_clone,
                     ) {
-                        resolved_calls.push(resolved);
+                        resolved_calls.insert(resolved);
                     }
                 }
             }
@@ -1022,16 +1018,16 @@ impl CallGraphBuilder {
                     ) {
                         // Restore the (...) suffix if it was there
                         if decorator.ends_with("(...)") {
-                            resolved_decorators.push(format!("{}(...)", resolved));
+                            resolved_decorators.insert(format!("{}(...)", resolved));
                         } else {
-                            resolved_decorators.push(resolved);
+                            resolved_decorators.insert(resolved);
                         }
                     }
                 }
             }
 
             // Resolve component_gets (similar to YAML resolution)
-            let mut resolved_component_gets = Vec::new();
+            let mut resolved_component_gets = IndexSet::new();
             for component_get in &func_info.component_gets {
                 let component_name = component_get.trim_matches('"');
                 // First try to resolve as a YAML call (simple function name)
@@ -1040,7 +1036,7 @@ impl CallGraphBuilder {
                     &functions_clone,
                     &lib_paths_clone,
                 ) {
-                    resolved_component_gets.push(resolved);
+                    resolved_component_gets.insert(resolved);
                 } else if component_name.contains('.') {
                     // If it's a dotted name and YAML resolution failed, try function call resolution
                     if let Some(resolved) = Self::resolve_call_with_imports(
@@ -1049,7 +1045,7 @@ impl CallGraphBuilder {
                         &functions_clone,
                         &modules_clone,
                     ) {
-                        resolved_component_gets.push(resolved);
+                        resolved_component_gets.insert(resolved);
                     }
                 }
             }
@@ -1294,7 +1290,7 @@ impl CallGraphBuilder {
                                 self.resolve_component_argument(first_arg, &current_module);
                             let component_get_info = resolved_component_name;
                             self.current_function_component_gets
-                                .push(component_get_info);
+                                .insert(component_get_info);
                         }
                     }
                 }
@@ -1564,13 +1560,13 @@ impl CallGraphBuilder {
                                             name: var_name.clone(),
                                             module: current_module.clone(),
                                             line: assign_stmt.range.start().to_usize(),
-                                            calls: vec![wrapped_func_name],
-                                            decorators: vec![],
-                                            resolved_calls: Vec::new(),
-                                            resolved_decorators: Vec::new(),
+                                            calls: IndexSet::from([wrapped_func_name]),
+                                            decorators: IndexSet::new(),
+                                            resolved_calls: IndexSet::new(),
+                                            resolved_decorators: IndexSet::new(),
                                             parameter_defaults: HashMap::new(),
-                                            component_gets: Vec::new(),
-                                            resolved_component_gets: Vec::new(),
+                                            component_gets: IndexSet::new(),
+                                            resolved_component_gets: IndexSet::new(),
                                             is_partial: true,
                                             return_annotation: None, // Partials don't have their own return annotations
                                             resolved_return_annotation: None,

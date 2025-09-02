@@ -1,4 +1,5 @@
 use anyhow::Context;
+use indexmap::IndexSet;
 use serde_yaml::Value;
 use std::fs;
 use std::path::Path;
@@ -28,7 +29,7 @@ impl FileAnalyzer for YamlAnalyzer {
         match serde_yaml::from_str::<Value>(&content) {
             Ok(yaml) => {
                 // Successful parsing - extract all information
-                let mut calls = Vec::new();
+                let mut calls = IndexSet::new();
 
                 // Extract component calls from instances
                 if let Some(instances) = yaml.get("instances") {
@@ -36,7 +37,7 @@ impl FileAnalyzer for YamlAnalyzer {
                         for (_, instance) in instances_map {
                             if let Some(component) = instance.get("component") {
                                 if let Some(component_name) = component.as_str() {
-                                    calls.push(component_name.to_string());
+                                    calls.insert(component_name.to_string());
                                 }
                             }
                         }
@@ -49,12 +50,12 @@ impl FileAnalyzer for YamlAnalyzer {
                     module: module_name.clone(),
                     line: 1,
                     calls,
-                    decorators: vec!["yaml".to_string()],
-                    resolved_calls: Vec::new(),
-                    resolved_decorators: Vec::new(),
+                    decorators: IndexSet::from(["yaml".to_string()]),
+                    resolved_calls: IndexSet::new(),
+                    resolved_decorators: IndexSet::new(),
                     parameter_defaults: std::collections::HashMap::new(),
-                    component_gets: Vec::new(),
-                    resolved_component_gets: Vec::new(),
+                    component_gets: IndexSet::new(),
+                    resolved_component_gets: IndexSet::new(),
                     is_partial: false,
                     return_annotation: None, // YAML functions don't have return annotations
                     resolved_return_annotation: None,
@@ -78,13 +79,13 @@ impl FileAnalyzer for YamlAnalyzer {
                     name: func_name.to_string(),
                     module: module_name.clone(),
                     line: 1,
-                    calls: Vec::new(),
-                    decorators: vec!["yaml".to_string()],
-                    resolved_calls: Vec::new(),
-                    resolved_decorators: Vec::new(),
+                    calls: IndexSet::new(),
+                    decorators: IndexSet::from(["yaml".to_string()]),
+                    resolved_calls: IndexSet::new(),
+                    resolved_decorators: IndexSet::new(),
                     parameter_defaults: std::collections::HashMap::new(),
-                    component_gets: Vec::new(),
-                    resolved_component_gets: Vec::new(),
+                    component_gets: IndexSet::new(),
+                    resolved_component_gets: IndexSet::new(),
                     is_partial: false,
                     return_annotation: None, // YAML functions don't have return annotations
                     resolved_return_annotation: None,
@@ -113,7 +114,7 @@ fn derive_yaml_module(file_path: &Path, lib_root: &Path, prefix: &str) -> String
             .unwrap_or("")
             .replace(std::path::MAIN_SEPARATOR, ".")
             .replace(".pic.yml", "_picyml");
-        
+
         // Combine prefix with the module path
         if module_path.is_empty() {
             prefix.to_string()

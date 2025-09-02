@@ -1,3 +1,4 @@
+use indexmap::IndexSet;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -19,13 +20,13 @@ pub struct FunctionInfo {
     pub name: String,
     pub module: String,
     pub line: usize,
-    pub calls: Vec<String>,
-    pub decorators: Vec<String>,
-    pub resolved_calls: Vec<String>,
-    pub resolved_decorators: Vec<String>,
+    pub calls: IndexSet<String>,
+    pub decorators: IndexSet<String>,
+    pub resolved_calls: IndexSet<String>,
+    pub resolved_decorators: IndexSet<String>,
     pub parameter_defaults: std::collections::HashMap<String, serde_json::Value>,
-    pub component_gets: Vec<String>,
-    pub resolved_component_gets: Vec<String>,
+    pub component_gets: IndexSet<String>,
+    pub resolved_component_gets: IndexSet<String>,
     pub is_partial: bool,
     pub return_annotation: Option<String>,
     pub resolved_return_annotation: Option<String>,
@@ -35,10 +36,10 @@ pub struct FunctionInfo {
 pub struct ModuleInfo {
     pub name: String,
     pub path: String,
-    pub functions: Vec<String>,
+    pub functions: IndexSet<String>,
     pub partials: HashMap<String, PartialInfo>,
-    pub imports: Vec<String>,
+    pub imports: IndexSet<String>,
     pub aliases: std::collections::HashMap<String, String>,
     pub constants: std::collections::HashMap<String, String>,
-    pub errors: Vec<String>,
+    pub errors: IndexSet<String>,
 }
