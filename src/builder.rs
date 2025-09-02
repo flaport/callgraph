@@ -222,13 +222,16 @@ impl CallGraphBuilder {
                 .replace(std::path::MAIN_SEPARATOR, ".")
                 .replace(".py", "");
 
-            // Remove .__init__ suffix for package __init__.py files
+            // Remove __init__ suffix for package __init__.py files
             // In Python, you import the package, not the __init__ file
             if module_path.ends_with(".__init__") {
                 module_path = module_path
                     .strip_suffix(".__init__")
                     .unwrap_or(&module_path)
                     .to_string();
+            } else if module_path == "__init__" {
+                // Handle the case where __init__.py is at the root of the library
+                module_path = String::new();
             }
 
             // Combine prefix with the module path
