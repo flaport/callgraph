@@ -793,13 +793,30 @@ impl CallGraphBuilder {
             for keyword in &call_expr.arguments.keywords {
                 if let Some(arg_name) = &keyword.arg {
                     if arg_name == "tags" {
-                        // Extract tags from the list/array
-                        if let Expr::List(list_expr) = &keyword.value {
-                            for element in &list_expr.elts {
-                                if let Expr::StringLiteral(string_lit) = element {
-                                    tags.insert(string_lit.value.to_string());
+                        // Extract tags from list, tuple, or set literals
+                        match &keyword.value {
+                            Expr::List(list_expr) => {
+                                for element in &list_expr.elts {
+                                    if let Expr::StringLiteral(string_lit) = element {
+                                        tags.insert(string_lit.value.to_string());
+                                    }
                                 }
                             }
+                            Expr::Tuple(tuple_expr) => {
+                                for element in &tuple_expr.elts {
+                                    if let Expr::StringLiteral(string_lit) = element {
+                                        tags.insert(string_lit.value.to_string());
+                                    }
+                                }
+                            }
+                            Expr::Set(set_expr) => {
+                                for element in &set_expr.elts {
+                                    if let Expr::StringLiteral(string_lit) = element {
+                                        tags.insert(string_lit.value.to_string());
+                                    }
+                                }
+                            }
+                            _ => {} // Ignore other types
                         }
                         break;
                     }
