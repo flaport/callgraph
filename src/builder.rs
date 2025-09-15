@@ -1154,7 +1154,7 @@ impl CallGraphBuilder {
                 return Some(format!("{}.{}", target_module, function_name));
             }
 
-            // Check if the function_name contains dots and might involve aliases within this module
+            // Check if the function_name contains dots and might involve aliases or imports within this module
             if function_name.contains('.') {
                 let parts: Vec<&str> = function_name.split('.').collect();
                 if parts.len() >= 2 {
@@ -1170,6 +1170,25 @@ impl CallGraphBuilder {
                             all_functions,
                             all_modules,
                         );
+                    }
+
+                    // Check if the first part is an imported submodule
+                    // Look for imports that match exactly or end with .first_part
+                    for import in &module_info.imports {
+                        // Check for exact match (e.g., "gdsfactory.routing")
+                        if import.split('.').last() == Some(first_part) {
+                            // Found a matching import, recursively resolve in that module
+                            if all_modules.contains_key(import) {
+                                if let Some(resolved) = Self::resolve_function_in_module(
+                                    &remaining_parts,
+                                    import,
+                                    all_functions,
+                                    all_modules,
+                                ) {
+                                    return Some(resolved);
+                                }
+                            }
+                        }
                     }
                 }
             }
