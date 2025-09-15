@@ -504,6 +504,13 @@ impl CallGraphBuilder {
                     .filter_map(|decorator| self.get_decorator_name(decorator))
                     .collect();
 
+                // Extract tags from decorators
+                let mut tags = IndexSet::new();
+                for decorator in &func_def.decorator_list {
+                    let decorator_tags = self.extract_decorator_tags(decorator);
+                    tags.extend(decorator_tags);
+                }
+
                 // Extract return type annotation
                 let return_annotation = self.extract_return_annotation(func_def);
 
@@ -527,6 +534,7 @@ impl CallGraphBuilder {
                     is_partial: false,
                     return_annotation,
                     resolved_return_annotation: None,
+                    tags,
                 };
 
                 // Add function to module's function list
@@ -563,6 +571,13 @@ impl CallGraphBuilder {
                             .filter_map(|decorator| self.get_decorator_name(decorator))
                             .collect();
 
+                        // Extract tags from decorators for methods
+                        let mut tags = IndexSet::new();
+                        for decorator in &method_def.decorator_list {
+                            let decorator_tags = self.extract_decorator_tags(decorator);
+                            tags.extend(decorator_tags);
+                        }
+
                         // Extract return type annotation for methods
                         let return_annotation = self.extract_return_annotation(method_def);
 
@@ -589,6 +604,7 @@ impl CallGraphBuilder {
                             is_partial: false,
                             return_annotation,
                             resolved_return_annotation: None,
+                            tags,
                         };
 
                         // Add function to module's function list
@@ -769,6 +785,31 @@ impl CallGraphBuilder {
         }
     }
 
+    fn extract_decorator_tags(&self, decorator: &ruff_python_ast::Decorator) -> IndexSet<String> {
+        let mut tags = IndexSet::new();
+
+        if let Expr::Call(call_expr) = &decorator.expression {
+            // Look for 'tags' keyword argument
+            for keyword in &call_expr.arguments.keywords {
+                if let Some(arg_name) = &keyword.arg {
+                    if arg_name == "tags" {
+                        // Extract tags from the list/array
+                        if let Expr::List(list_expr) = &keyword.value {
+                            for element in &list_expr.elts {
+                                if let Expr::StringLiteral(string_lit) = element {
+                                    tags.insert(string_lit.value.to_string());
+                                }
+                            }
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+
+        tags
+    }
+
     fn find_base_function<'a>(
         mut current_func: &'a FunctionInfo,
         functions: &'a [FunctionInfo],
@@ -926,6 +967,9 @@ impl CallGraphBuilder {
                         func.return_annotation = base_func.return_annotation.clone();
                         func.resolved_return_annotation =
                             base_func.resolved_return_annotation.clone();
+
+                        // Copy tags from the base function
+                        func.tags = base_func.tags.clone();
                     }
                 }
             }
@@ -1683,6 +1727,7 @@ impl CallGraphBuilder {
                                             is_partial: true,
                                             return_annotation: None, // Partials don't have their own return annotations
                                             resolved_return_annotation: None,
+                                            tags: IndexSet::new(), // Partials will inherit tags from base function
                                         };
                                         self.functions.push(partial_info);
                                     }

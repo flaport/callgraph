@@ -60,6 +60,7 @@ impl FileAnalyzer for YamlAnalyzer {
                     is_partial: false,
                     return_annotation: None, // YAML functions don't have return annotations
                     resolved_return_annotation: None,
+                    tags: IndexSet::new(), // YAML functions don't have tags
                 };
 
                 // Add function to module's function list
@@ -91,6 +92,7 @@ impl FileAnalyzer for YamlAnalyzer {
                     is_partial: false,
                     return_annotation: None, // YAML functions don't have return annotations
                     resolved_return_annotation: None,
+                    tags: IndexSet::new(), // YAML functions don't have tags
                 };
 
                 // Add function to module's function list

@@ -31,6 +31,7 @@ pub struct FunctionInfo {
     pub is_partial: bool,
     pub return_annotation: Option<String>,
     pub resolved_return_annotation: Option<String>,
+    pub tags: IndexSet<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
