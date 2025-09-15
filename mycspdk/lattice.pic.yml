@@ -1,7 +1,8 @@
-# yaml-language-server: $schema=../build/schemas/lattice.json
 instances:
   mzi1:
-    component: mzi3
+    component: mzi
+    settings:
+      splitter: mmi2x2
   mzi2:
     component: mzi
     settings:
