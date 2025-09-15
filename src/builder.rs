@@ -1259,6 +1259,14 @@ impl CallGraphBuilder {
                             return Some(resolved);
                         }
                     }
+
+                    // If it's neither a function nor a module, but it IS imported,
+                    // it might be a callable object (like a partial or a class).
+                    // For decorators and other callable references, we should still
+                    // return the import path as the resolution.
+                    // This handles cases like cell_with_module_name which is created
+                    // via override_defaults but is still used as a decorator.
+                    return Some(import.clone());
                 }
             }
 
