@@ -521,6 +521,7 @@ impl CallGraphBuilder {
                     resolved_calls,
                     resolved_decorators: IndexSet::new(),
                     parameter_defaults,
+                    resolved_parameter_defaults: HashMap::new(),
                     component_gets: self.current_function_component_gets.clone(),
                     resolved_component_gets: IndexSet::new(),
                     is_partial: false,
@@ -582,6 +583,7 @@ impl CallGraphBuilder {
                             resolved_calls,
                             resolved_decorators: IndexSet::new(),
                             parameter_defaults,
+                            resolved_parameter_defaults: HashMap::new(),
                             component_gets: self.current_function_component_gets.clone(),
                             resolved_component_gets: IndexSet::new(),
                             is_partial: false,
@@ -916,6 +918,10 @@ impl CallGraphBuilder {
                         func.component_gets = base_func.component_gets.clone();
                         func.resolved_component_gets = base_func.resolved_component_gets.clone();
 
+                        // Copy resolved parameter defaults from the base function
+                        func.resolved_parameter_defaults =
+                            base_func.resolved_parameter_defaults.clone();
+
                         // Copy return annotations from the base function
                         func.return_annotation = base_func.return_annotation.clone();
                         func.resolved_return_annotation =
@@ -1056,6 +1062,39 @@ impl CallGraphBuilder {
             func_info.resolved_calls = resolved_calls;
             func_info.resolved_decorators = resolved_decorators;
             func_info.resolved_component_gets = resolved_component_gets;
+
+            // Resolve parameter defaults (for string values)
+            let mut resolved_parameter_defaults = HashMap::new();
+            for (param_name, param_value) in &func_info.parameter_defaults {
+                if let serde_json::Value::String(string_value) = param_value {
+                    // Try to resolve the string value as a function reference
+                    let mut resolved_value = param_value.clone();
+
+                    // First try to resolve as a YAML call (simple function name)
+                    if let Some(resolved) = Self::resolve_yaml_call_static(
+                        string_value,
+                        &functions_clone,
+                        &lib_paths_clone,
+                    ) {
+                        resolved_value = serde_json::Value::String(resolved);
+                    } else if string_value.contains('.') {
+                        // If it's a dotted name and YAML resolution failed, try function call resolution
+                        if let Some(resolved) = Self::resolve_call_with_imports(
+                            string_value,
+                            &func_info.module,
+                            &functions_clone,
+                            &modules_clone,
+                        ) {
+                            resolved_value = serde_json::Value::String(resolved);
+                        }
+                    }
+                    resolved_parameter_defaults.insert(param_name.clone(), resolved_value);
+                } else {
+                    // For non-string values, keep them as-is
+                    resolved_parameter_defaults.insert(param_name.clone(), param_value.clone());
+                }
+            }
+            func_info.resolved_parameter_defaults = resolved_parameter_defaults;
 
             // Resolve return type annotation
             if let Some(ref return_annotation) = func_info.return_annotation {
@@ -1630,6 +1669,7 @@ impl CallGraphBuilder {
                                             resolved_calls: IndexSet::new(),
                                             resolved_decorators: IndexSet::new(),
                                             parameter_defaults: HashMap::new(),
+                                            resolved_parameter_defaults: HashMap::new(),
                                             component_gets: IndexSet::new(),
                                             resolved_component_gets: IndexSet::new(),
                                             is_partial: true,

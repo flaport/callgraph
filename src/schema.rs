@@ -25,6 +25,7 @@ pub struct FunctionInfo {
     pub resolved_calls: IndexSet<String>,
     pub resolved_decorators: IndexSet<String>,
     pub parameter_defaults: std::collections::HashMap<String, serde_json::Value>,
+    pub resolved_parameter_defaults: std::collections::HashMap<String, serde_json::Value>,
     pub component_gets: IndexSet<String>,
     pub resolved_component_gets: IndexSet<String>,
     pub is_partial: bool,
